@@ -1,4 +1,4 @@
-headless: false
+headless: true
 
 sim: ${task.sim}
 env: ${task.env}
@@ -17,8 +17,8 @@ wandb:
   group: ${oc.select:..task.name}
   run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
   job_type: train
-  entity: marl-drones
-  project: omnidrones
+  entity: chenjy
+  project: issac_drones
   mode: online # set to 'disabled' when debugging locally
   run_id: 
   monitor_gym: True
