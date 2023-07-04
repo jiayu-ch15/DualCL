@@ -5,7 +5,7 @@ env: ${task.env}
 
 total_frames: 250_000_000
 max_iters: -1
-eval_interval: -1
+eval_interval: 10
 save_interval: -1
 seed: 0
 
@@ -20,6 +20,7 @@ wandb:
   entity: chenjy
   project: issac_drones
   mode: online # set to 'disabled' when debugging locally
+  # mode: disabled
   run_id: 
   monitor_gym: True
   tags: 

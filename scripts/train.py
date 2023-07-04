@@ -80,7 +80,6 @@ def main(cfg):
         "dreamer": DreamerPolicy,
         "tdmpc": TDMPCPolicy
     }
-
     env_class = IsaacEnv.REGISTRY[cfg.task.name]
     base_env = env_class(cfg, headless=cfg.headless)
     
