@@ -6,6 +6,7 @@ from tensordict.tensordict import TensorDict, TensorDictBase
 import omni.isaac.core.utils.torch as torch_utils
 from omni.isaac.core.objects import VisualSphere
 import omni.isaac.core.objects as objects
+import torch.distributions as D
 
 from omni_drones.envs.isaac_env import IsaacEnv, AgentSpec
 from omni_drones.robots.config import RobotCfg
@@ -48,13 +49,6 @@ class PredatorPrey(IsaacEnv):
         self.init_pos_scale = torch.tensor([2., 2., 0.6], device=self.device) 
         self.init_pos_offset = torch.tensor([-1., -1., 0.3], device=self.device)
 
-        # stats_spec = CompositeSpec({
-        #     "pos_error": UnboundedContinuousTensorSpec(1),
-        #     "heading_alignment": UnboundedContinuousTensorSpec(1),
-        #     "uprightness": UnboundedContinuousTensorSpec(1),
-        #     "action_smoothness": UnboundedContinuousTensorSpec(1),
-        #     "motion_smoothness": UnboundedContinuousTensorSpec(1)
-        # }).expand(self.num_envs).to(self.device)
         info_spec = CompositeSpec({
             "drone_state": UnboundedContinuousTensorSpec((self.drone.n, 13)),
         }).expand(self.num_envs).to(self.device)
@@ -88,21 +82,16 @@ class PredatorPrey(IsaacEnv):
     
     def _reset_idx(self, env_ids: torch.Tensor):
         _, rot = self.init_poses
-        self.drone._reset_idx(env_ids)
+        self.drone._reset_idx(env_ids, self.training)
         pos = torch.rand(len(env_ids), 1, 3, device=self.device) * self.init_pos_scale + self.init_pos_offset
-        self.drone.set_world_poses(pos, rot[env_ids], env_ids)
+        self.drone.set_world_poses(
+            pos + self.envs_positions[env_ids].unsqueeze(1), rot[env_ids], env_ids
+        )
         self.drone.set_velocities(torch.zeros_like(self.vels[env_ids]), env_ids)
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
         actions = tensordict[("action", "drone.action")]
         self.effort = self.drone.apply_action(actions)
-    
-    # def _compute_state_and_obs(self):
-    #     obs = self.drone.get_state()
-        
-    #     return TensorDict({
-    #         "drone.obs": obs
-    #     }, self.batch_size)
 
     def _compute_state_and_obs(self):
         self.root_state = self.drone.get_state()
