@@ -413,15 +413,6 @@ class PredatorPrey_debug(IsaacEnv):
         plt.figure()
         plt.plot(level, times)
         plt.savefig('buffer_num.png')
-        # if 1:
-        #     x = np.array(self.goals.buffer0)[...,0]
-        #     y = np.array(self.goals.buffer_priority0)
-        #     plt.figure()
-        #     plt.plot(x, y, 'o')
-        #     slope, intercept = np.polyfit(x, y, 1)
-        #     y = slope*x + intercept
-        #     figure2, = plt.plot(x, y, color='r')
-        #     plt.savefig('buffer_reward.png')
         return {"buffer": wandb.Plotly(plt.gcf())}
     
     def print_success(self, x, suc, ran):
