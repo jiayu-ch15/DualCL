@@ -7,6 +7,7 @@ from .spread import Spread
 from .forest import Forest
 from .payload import PayloadTrack, PayloadFlyThrough
 from .predatorprey import PredatorPrey
+from .predatorprey_debug import PredatorPrey_debug
 # from .multi_gate import MultiGate
 from .rearrange import Rearrange
 
