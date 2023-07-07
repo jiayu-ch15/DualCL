@@ -40,9 +40,8 @@ class PredatorPrey_debug(IsaacEnv):
         self.env_ids = torch.from_numpy(np.arange(0,cfg.env.num_envs))
         self.env_width = cfg.env.env_spacing/2.0
         self.radius = self.env_width
-        self.progress_buf2 = self.progress_buf*1.0
-        self.caught = self.progress_buf2*0
-        self.returns = self.progress_buf2*0
+        self.caught = self.progress_buf * 0
+        self.returns = self.progress_buf * 0
         self.init_poses = self.drone.get_world_poses(clone=True)
 
         # CL
@@ -50,7 +49,7 @@ class PredatorPrey_debug(IsaacEnv):
        
         self.random_idx = torch.ones(self.num_envs, device=self.device)
         
-        
+        # TODO, time_encoding
         self.agent_spec["drone"] = AgentSpec(
             "drone", self.num_agents, 
             UnboundedContinuousTensorSpec(13 + 6*self.num_agents + 3*self.num_obstacles + 1, device=self.device),
@@ -265,7 +264,7 @@ class PredatorPrey_debug(IsaacEnv):
         prey_vel = self.target.get_velocities()[..., :3].unsqueeze(1).expand(-1,self.num_agents,-1)
         obstacle_pos = self.pos_obstacle.unsqueeze(1).expand(-1,self.num_agents,-1,-1) - drone_pos.unsqueeze(-2).expand(-1,-1,self.num_obstacles,-1)
         obs = torch.cat((drone_state, prey_pos, prey_vel, obstacle_pos.reshape(self.num_envs, self.num_agents, -1), \
-            self.progress_buf2.unsqueeze(-1).unsqueeze(-1).expand(-1,self.num_agents, -1)/self.cfg.env.max_episode_length),-1)
+            self.progress_buf.unsqueeze(-1).unsqueeze(-1).expand(-1,self.num_agents, -1)/self.cfg.env.max_episode_length),-1)
 
         return TensorDict({
             "drone.obs": obs
@@ -304,11 +303,14 @@ class PredatorPrey_debug(IsaacEnv):
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].squeeze(-1).sum(-1)*1.0
 
-        self.progress_buf2 = self.progress_buf2 * (self.progress_buf > 0) + 1
+        # self.progress_buf2 = self.progress_buf2 * (self.progress_buf > 0) + 1
         
-        done  = (self.progress_buf2 >= self.max_episode_length).unsqueeze(-1) \
-            | ((self.caught > 0).unsqueeze(-1) & (self.progress_buf2.unsqueeze(-1) > 1))*self.cfg.reset0
+        # done  = (self.progress_buf2 >= self.max_episode_length).unsqueeze(-1) \
+        #     | ((self.caught > 0).unsqueeze(-1) & (self.progress_buf2.unsqueeze(-1) > 1))*self.cfg.reset0
         
+        done  = (
+            (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
+        )
         
         caught = (catch_reward > 0) * 1.0
         self.caught = (self.progress_buf > 0) * ((self.caught + caught.any(-1)) > 0)
@@ -323,7 +325,7 @@ class PredatorPrey_debug(IsaacEnv):
             "reward": {
                 "drone.reward": reward.unsqueeze(-1)
             },
-            "done": done.any(-1),
+            "done": done,
             "caught": self.caught * 1.0,
             "return": self._tensordict["return"],
             "success": self.success*torch.ones(self.num_envs, device=self.device),
