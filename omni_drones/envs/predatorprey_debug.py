@@ -404,7 +404,7 @@ class PredatorPrey_debug(IsaacEnv):
             # "buffer_min": self.goals.buffer_min*torch.ones(self.num_envs, device=self.device),
             # "keep": self.goals.keep*torch.ones(self.num_envs, device=self.device),
             "collision_times": self.coll_times.sum(-1), #就是coll_reward
-            "cl_level": self.cl_level*torch.ones(self.num_envs, device=self.device),
+            # "cl_level": self.cl_level*torch.ones(self.num_envs, device=self.device),
             "progress_std": self.progress_std**torch.ones(self.num_envs, device=self.device)
         }, self.batch_size)
 
