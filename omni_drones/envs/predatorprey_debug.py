@@ -73,7 +73,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.time_encoding = self.cfg.task.time_encoding
 
         self.target_init_vel = self.target.get_velocities(clone=True)
-        self.env_ids = torch.from_numpy(np.arange(0,cfg.env.num_envs))
+        self.env_ids = torch.from_numpy(np.arange(0, cfg.env.num_envs))
         self.radius = cfg.env.env_spacing / 2.0
         self.caught = self.progress_buf * 0
         self.returns = self.progress_buf * 0
@@ -154,7 +154,6 @@ class PredatorPrey_debug(IsaacEnv):
         self.target_args_ = torch.zeros(self.num_envs, device=self.device)
         self.outside = torch.zeros(self.num_envs, device=self.device)
         self.xx = 0
-        self.cl_level = self.cfg.vel0
         self.progress_std = 0
         self.sample_buffer = []
         self.caught_buffer = []
@@ -288,10 +287,7 @@ class PredatorPrey_debug(IsaacEnv):
         forces_target = self._get_dummy_policy_prey()
         
         # fixed velocity
-        # target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
-        
-        # fixed target
-        target_vel = torch.zeros_like(target_vel)
+        target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
         
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
 
