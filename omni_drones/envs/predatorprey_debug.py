@@ -230,24 +230,28 @@ class PredatorPrey_debug(IsaacEnv):
         actions = tensordict[("action", "drone.action")]
         self.effort = self.drone.apply_action(actions)
         
-        alpha = 1.0
+        # target_vel = self.target.get_velocities()
+        # forces_target = self._get_dummy_policy_prey()
+        # target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
         
-        forces_target = self._get_dummy_policy_prey()
-        target_vel = self.target.get_velocities()
-        import pdb; pdb.set_trace()
-        # TODO set velocity of prey
+        # fixed target
+        target_vel = torch.zeros_like(target_vel)
+        
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
 
     def _compute_state_and_obs(self):
-        prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
+
+        # prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
         drone_state = self.drone.get_state()[..., :13]
-        drone_state0 = drone_state*1.0
-        drone_pos = drone_state0[..., :3]
+        drone_pos, _ = self.drone.get_world_poses(False)
+        import pdb; pdb.set_trace()
         for i in range(self.num_agents - 1):
             drone_state = torch.cat((drone_state, drone_state0[..., (np.arange(0,self.num_agents) + i + 1)%self.num_agents, :3],
                                     drone_state0[..., (np.arange(0,self.num_agents) + i + 1)%self.num_agents, 7:10]
             ), -1)
-        prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
+        prey_pos, _ = self.target.get_world_poses()
+        prey_pos = prey_pos.unsqueeze(1).expand(-1, self.num_agents, -1)
+        prey_reletive
         prey_vel = self.target.get_velocities()[..., :3].unsqueeze(1).expand(-1,self.num_agents,-1)
         obstacle_pos = self.pos_obstacle.unsqueeze(1).expand(-1,self.num_agents,-1,-1) - drone_pos.unsqueeze(-2).expand(-1,-1,self.num_obstacles,-1)
         obs = torch.cat((drone_state, prey_pos, prey_vel, obstacle_pos.reshape(self.num_envs, self.num_agents, -1), \
@@ -257,8 +261,6 @@ class PredatorPrey_debug(IsaacEnv):
             "drone.obs": obs
         }, self.batch_size)
 
-    # vel_obs
-    # reward_average
     def _compute_reward_and_done(self):
         pos, rot = self.drone.get_world_poses(False)
         prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
@@ -386,13 +388,6 @@ class PredatorPrey_debug(IsaacEnv):
         pos = orient * torch.from_numpy(np.random.uniform(radius[0], radius[1], size[:-1]+[1])).to(self.device).expand_as(orient)
         return pos.type(torch.float32)
     
-    def get_orient(self, x):
-        y = torch.norm(x, dim=-1).unsqueeze(-1).expand_as(x) 
-        
-    def normalize(self, x):
-        y = x / (torch.norm(x, dim=-1).unsqueeze(-1).expand_as(x)+1e-12)
-        return y
-
     # def create_goalproposal_mix(self):
     #     buffer_length = self.num_envs*50 #for debugging
     #     device = self.device
