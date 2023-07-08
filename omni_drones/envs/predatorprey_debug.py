@@ -8,6 +8,8 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import wandb
 import time
+from functorch import vmap
+from omni_drones.utils.torch import cpos, off_diag, others
 
 import omni.isaac.core.objects as objects
 # from omni.isaac.core.objects import VisualSphere, DynamicSphere, FixedCuboid, VisualCylinder, FixedCylinder, DynamicCylinder
@@ -19,27 +21,59 @@ from omni_drones.robots.drone import MultirotorBase
 import omni_drones.utils.kit as kit_utils
 # import omni_drones.utils.restart_sampling as rsp
 from pxr import UsdGeom, Usd, UsdPhysics
+import omni.isaac.core.utils.prims as prim_utils
+import omni.physx.scripts.utils as script_utils
+from omni_drones.utils.scene import design_scene
 
 # drones on land by default
 # only cubes are available as walls
 # clip state as walls
 
-class PredatorPrey_debug(IsaacEnv):
-    
+def create_obstacle(
+    prim_path: str,
+    translation=(0., 0., 2.5),
+    height: float=5,
+):
+    prim = prim_utils.create_prim(
+        prim_path=prim_path,
+        prim_type="Capsule",
+        translation=translation,
+        attributes={"radius":0.05, "height": height}
+    )
+    UsdPhysics.RigidBodyAPI.Apply(prim)
+    UsdPhysics.CollisionAPI.Apply(prim)
+    kit_utils.set_collision_properties(
+        prim_path, contact_offset=0.02, rest_offset=0
+    )
+
+    stage = prim_utils.get_current_stage()
+    script_utils.createJoint(stage, "Fixed", prim.GetParent(), prim)
+    return prim
+
+class PredatorPrey_debug(IsaacEnv): 
     def __init__(self, cfg, headless):
         super().__init__(cfg, headless)
         self.drone.initialize()
-        self.obstacle = []
-        for i in range(self.num_obstacles):
-            # self.obstacle.append(GeometryPrimView(prim_paths_expr="/World/envs/env_*/obstacle_{idx}".format(idx=i)))
-            self.obstacle.append(RigidPrimView(prim_paths_expr="/World/envs/env_*/obstacle_{idx}".format(idx=i)))
-        self.target = RigidPrimView("/World/envs/env_*/target", reset_xform_properties=False)
+
+        self.target = RigidPrimView(
+            "/World/envs/env_*/target", 
+            reset_xform_properties=False
+        )
         self.target.initialize()
+        
+        self.obstacles = RigidPrimView(
+            "/World/envs/env_*/obstacle_*",
+            reset_xform_properties=False,
+            shape=[self.num_envs, -1],
+            # track_contact_forces=True
+        )
+        self.obstacles.initialize()
+        
+        self.time_encoding = self.cfg.task.time_encoding
 
         self.target_init_vel = self.target.get_velocities(clone=True)
         self.env_ids = torch.from_numpy(np.arange(0,cfg.env.num_envs))
-        self.env_width = cfg.env.env_spacing/2.0
-        self.radius = self.env_width
+        self.radius = cfg.env.env_spacing / 2.0
         self.caught = self.progress_buf * 0
         self.returns = self.progress_buf * 0
         self.init_poses = self.drone.get_world_poses(clone=True)
@@ -49,13 +83,43 @@ class PredatorPrey_debug(IsaacEnv):
        
         self.random_idx = torch.ones(self.num_envs, device=self.device)
         
-        # TODO, time_encoding
+        drone_state_dim = self.drone.state_spec.shape.numel()
+        frame_state_dim = 3
+        if self.time_encoding:
+            self.time_encoding_dim = 4
+            frame_state_dim += self.time_encoding_dim        
+
+        if self.num_obstacles > 0:
+            observation_spec = CompositeSpec({
+                "state_self": UnboundedContinuousTensorSpec((1, drone_state_dim + self.drone.n)),
+                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13)),
+                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+                "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 2)),
+            }).to(self.device)
+            state_spec = CompositeSpec({
+                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim + self.drone.n)),
+                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+                "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 2)),
+            }).to(self.device)
+        else:
+            observation_spec = CompositeSpec({
+                "state_self": UnboundedContinuousTensorSpec((1, drone_state_dim + self.drone.n)),
+                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13)),
+                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+            }).to(self.device)
+            state_spec = CompositeSpec({
+                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim + self.drone.n)),
+                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+            }).to(self.device)
+        
         self.agent_spec["drone"] = AgentSpec(
-            "drone", self.num_agents, 
-            UnboundedContinuousTensorSpec(13 + 6*self.num_agents + 3*self.num_obstacles + 1, device=self.device),
+            "drone",
+            self.drone.n,
+            observation_spec,
             self.drone.action_spec.to(self.device),
             UnboundedContinuousTensorSpec(1).to(self.device),
-        )        
+            state_spec
+        )  
         
         self.task_config = TensorDict({
             "max_linvel": torch.ones(self.num_envs, 1, device=self.device)
@@ -65,11 +129,11 @@ class PredatorPrey_debug(IsaacEnv):
         self.init_pos_scale = torch.tensor([2., 2., 0], device=self.device) 
         self.init_pos_offset = torch.tensor([-1., -1., 0], device=self.device)
         
-
     def _design_scene(self):
         self.num_agents = self.cfg.num_agents
         self.num_obstacles = self.cfg.num_obstacles
         self.size_obstacle = self.cfg.size_obstacle
+        self.radius = self.cfg.env.env_spacing / 2.0
 
         self.v_low = self.cfg.v_drone * self.cfg.v_low
         self.v_high = self.cfg.v_drone * self.cfg.v_high
@@ -114,22 +178,7 @@ class PredatorPrey_debug(IsaacEnv):
             height=0.001,
             color=torch.tensor([0., 0., 0.]),
         )
-
-        
-        for i in range(self.num_obstacles):
-            objects.DynamicCylinder(
-                prim_path="/World/envs/env_0/obstacle_{idx}".format(idx=i),
-                name="obstacle",
-                color=torch.tensor([0., 0.1, 0.]),
-                radius = self.size_obstacle,
-                height = 2,
-                visible = 1, # air wall
-            )
-            prim = objects.DynamicCylinder.prim
-            UsdPhysics.RigidBodyAPI.Apply(prim)
-            UsdPhysics.CollisionAPI.Apply(prim)
-            prim.GetAttribute("physics:kinematicEnabled").Set(True)
-
+    
         kit_utils.set_rigid_body_properties(
             prim_path="/World/envs/env_0/target",
             disable_gravity=True
@@ -147,7 +196,14 @@ class PredatorPrey_debug(IsaacEnv):
             translation[:, 0] = i 
             translation[:, 1] = torch.arange(n)
             translation[:, 2] = 0.5
-        self.drone.spawn(translation) #to make n drones
+        self.drone.spawn(translation) # to make n drones
+        # design_scene()
+
+        # obstacle_spacing = self.cfg.task.obstacle_spacing
+        self.pos_obstacle = self.random_polar([self.num_envs, self.num_obstacles, 3], [0, self.radius])
+        for idx in range(self.num_obstacles):
+            create_obstacle("/World/envs/env_0/obstacle_{}".format(idx), translation=self.pos_obstacle[0][idx])
+        
         return ["/World/defaultGroundPlane"]
     
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -209,13 +265,10 @@ class PredatorPrey_debug(IsaacEnv):
         self.mean_vel[env_ids] *= 0
         self.collided[env_ids] *= 0
 
-        #obstalces
+        # obstalces
         self.pos_obstacle = self.random_polar([self.num_envs, self.num_obstacles, 3], [0, self.radius])
-        if self.num_obstacles > 0 and self.test_count % 1 ==0:
-            for i in range(self.num_obstacles):
-                self.obstacle[i].set_world_poses((self.envs_positions + self.pos_obstacle[:, i, :])[env_ids], indices=env_ids)
-                # aaa = self.obstacle[i].get_net_contact_forces(indices=[0,1])
-            pass
+        if self.num_obstacles > 0:
+            self.obstacles.set_world_poses((self.envs_positions.unsqueeze(1) + self.pos_obstacle)[env_ids], env_indices=env_ids)
 
         self.target_pos = self.random_polar([self.num_envs, 3], [self.radius*0, self.radius*1.0])
         self.target_pos[..., 2] = 0.5
@@ -230,8 +283,10 @@ class PredatorPrey_debug(IsaacEnv):
         actions = tensordict[("action", "drone.action")]
         self.effort = self.drone.apply_action(actions)
         
-        # target_vel = self.target.get_velocities()
-        # forces_target = self._get_dummy_policy_prey()
+        target_vel = self.target.get_velocities()
+        forces_target = self._get_dummy_policy_prey()
+        
+        # fixed velocity
         # target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
         
         # fixed target
@@ -240,63 +295,85 @@ class PredatorPrey_debug(IsaacEnv):
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
 
     def _compute_state_and_obs(self):
+        self.drone_states = self.drone.get_state()
+        drone_pos = self.drone_states[..., :3]
+        self.drone_rpos = vmap(cpos)(drone_pos, drone_pos)
+        self.drone_rpos = vmap(off_diag)(self.drone_rpos)
+        
+        target_pos, _ = self.target.get_world_poses()
+        target_pos = target_pos.unsqueeze(1)
+        target_rpos = target_pos - self.drone_states[..., :3]
+        if self.time_encoding:
+            t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
+            target_state = torch.cat([
+                target_pos,
+                t.expand(-1, self.time_encoding_dim).unsqueeze(1)
+            ], dim=-1) # [num_envs, 1, 25+time_encoding_dim]
+        else:
+            target_state = torch.cat([
+                target_pos
+            ], dim=-1) # [num_envs, 1, 25]
 
-        # prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
-        drone_state = self.drone.get_state()[..., :13]
-        drone_pos, _ = self.drone.get_world_poses(False)
-        import pdb; pdb.set_trace()
-        for i in range(self.num_agents - 1):
-            drone_state = torch.cat((drone_state, drone_state0[..., (np.arange(0,self.num_agents) + i + 1)%self.num_agents, :3],
-                                    drone_state0[..., (np.arange(0,self.num_agents) + i + 1)%self.num_agents, 7:10]
-            ), -1)
-        prey_pos, _ = self.target.get_world_poses()
-        prey_pos = prey_pos.unsqueeze(1).expand(-1, self.num_agents, -1)
-        prey_reletive
-        prey_vel = self.target.get_velocities()[..., :3].unsqueeze(1).expand(-1,self.num_agents,-1)
-        obstacle_pos = self.pos_obstacle.unsqueeze(1).expand(-1,self.num_agents,-1,-1) - drone_pos.unsqueeze(-2).expand(-1,-1,self.num_obstacles,-1)
-        obs = torch.cat((drone_state, prey_pos, prey_vel, obstacle_pos.reshape(self.num_envs, self.num_agents, -1), \
-            self.progress_buf.unsqueeze(-1).unsqueeze(-1).expand(-1,self.num_agents, -1)/self.cfg.env.max_episode_length),-1)
+        identity = torch.eye(self.drone.n, device=self.device).expand(self.num_envs, -1, -1)
 
-        return TensorDict({
-            "drone.obs": obs
-        }, self.batch_size)
+        obs = TensorDict({}, [self.num_envs, self.drone.n])
+        obs["state_self"] = torch.cat(
+            [-target_rpos, self.drone_states[..., 3:], identity], dim=-1
+        ).unsqueeze(2)
+        obs["state_others"] = torch.cat(
+            [self.drone_rpos, vmap(others)(self.drone_states[..., 3:13])], dim=-1
+        )
+        obs["state_frame"] = target_state.unsqueeze(1).expand(-1, self.drone.n, 1, -1)
+        obstacle_pos, _ = self.obstacles.get_world_poses()
+        if self.num_obstacles > 0:
+            obs["obstacles"] = obstacle_pos[...,:2].unsqueeze(1).expand(-1, self.drone.n, self.num_obstacles, -1)
+
+        state = TensorDict({}, [self.num_envs])
+        state["state_drones"] = obs["state_self"].squeeze(2)    # [num_envs, drone.n, drone_state_dim]
+        state["state_frame"] = target_state                # [num_envs, 1, target_rpos_dim]
+        if self.num_obstacles > 0:
+            state["obstacles"] = obstacle_pos[...,:2]    # [num_envs, num_obstacles, obstacles_dim]
+
+        return TensorDict(
+            {
+                "drone.obs": obs,
+                "drone.state": state,
+            },
+            self.batch_size,
+        )
 
     def _compute_reward_and_done(self):
-        pos, rot = self.drone.get_world_poses(False)
-        prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
-        prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
+        self.drone_states = self.drone.get_state()
+        drone_pos = self.drone_states[..., :3]
+        target_pos, _ = self.target.get_world_poses()
+        target_pos = target_pos.unsqueeze(1)
 
-        target_dist = torch.norm(pos-prey_pos, dim=-1)
+        target_dist = torch.norm(target_pos - self.drone_states[..., :3], dim=-1)
 
-        catch_reward = 1.0 * (target_dist < 0.12) #sparse
+        catch_reward = 1.0 * (target_dist < 0.12) # sparse
         catch_reward = 1.0 * catch_reward.sum(-1).unsqueeze(-1).expand_as(catch_reward)
 
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
         
-        
+        obstacle_pos, _ = self.obstacles.get_world_poses()
         for i in range(self.num_obstacles):
-            relative_pos = pos[..., :2] - self.pos_obstacle[:, i, :2].unsqueeze(-2).expand_as(pos[..., :2])
+            relative_pos = drone_pos[..., :2] - obstacle_pos[:, i, :2].unsqueeze(-2)
             norm_r = torch.norm(relative_pos, dim=-1)
-            if_coll = 1.0*(norm_r < 0.2)
+            if_coll = (norm_r < 0.2).type(torch.float32)
             self.coll_times += if_coll
             coll_reward -= if_coll # sparse
             self.collided = 1.0 * ((self.collided + if_coll) > 0)
 
-        # distance-based reward
+        # distance reward
         min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
         distance_reward = - 1.0 * min_dist
 
-        reward = 1.0*catch_reward + 5.0*coll_reward + distance_reward
+        reward = 1.0 * catch_reward + 5.0 * coll_reward + distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].squeeze(-1).sum(-1)*1.0
 
-        # self.progress_buf2 = self.progress_buf2 * (self.progress_buf > 0) + 1
-        
-        # done  = (self.progress_buf2 >= self.max_episode_length).unsqueeze(-1) \
-        #     | ((self.caught > 0).unsqueeze(-1) & (self.progress_buf2.unsqueeze(-1) > 1))*self.cfg.reset0
-        
         done  = (
             (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
         )
@@ -305,9 +382,9 @@ class PredatorPrey_debug(IsaacEnv):
         self.caught = (self.progress_buf > 0) * ((self.caught + caught.any(-1)) > 0)
         self.progress_std = torch.std(self.progress_buf)
 
-        self.random_success = torch.sum(self.random_idx*self.caught)/(torch.sum(self.random_idx)+1e-7)*100
-        self.train_success = torch.sum(self.caught*(1-self.random_idx))/(torch.sum(1-self.random_idx)+1e-7)*100
-        self.success = torch.sum(self.caught)/self.num_envs*100
+        self.random_success = torch.sum(self.random_idx * self.caught) / (torch.sum(self.random_idx) + 1e-5) * 100
+        self.train_success = torch.sum(self.caught * (1 - self.random_idx)) / (torch.sum(1 - self.random_idx) + 1e-5) * 100
+        self.success = torch.sum(self.caught) / self.num_envs * 100
         # num_level = len(self.goals.buffer)*torch.ones(self.num_envs, device=self.device)
 
         return TensorDict({
@@ -357,29 +434,18 @@ class PredatorPrey_debug(IsaacEnv):
         
         # TODO, the top and bottom force
 
-        # obstacles        
-        for i in range(self.num_obstacles):
-            dist_pos = torch.norm(prey_pos[..., :2] - self.pos_obstacle[:, i, :2],dim=-1).unsqueeze(-1).expand(-1,-1,2)
-            direction_o = (prey_pos[..., :2] - self.pos_obstacle[:, i, :2]) / (dist_pos + 1e-5)
-            # orient = self.normalize(prey_pos - pos)
-            force_o = direction_o * (1 / (dist_pos + 1e-5))
-            force[..., :2] += force_o
+        # obstacles
+        obstacle_pos, _ = self.obstacles.get_world_poses()
+        dist_pos = torch.norm(prey_pos[..., :2] - obstacle_pos[..., :2],dim=-1).unsqueeze(-1).expand(-1, -1, 2)
+        direction_o = (prey_pos[..., :2] - obstacle_pos[..., :2]) / (dist_pos + 1e-5)
+        # orient = self.normalize(prey_pos - pos)
+        force_o = direction_o * (1 / (dist_pos + 1e-5))
+        force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
         force[..., 2] = 0
         return force.type(torch.float32)
     
-    # def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-    #     self._pre_sim_step(tensordict)
-    #     for _ in range(1):
-    #         self.sim.step(self.enable_render)
-    #     tensordict = TensorDict({"next": {}}, self.batch_size)
-    #     tensordict["next"].update(self._compute_state_and_obs())
-    #     tensordict["next"].update(self._compute_reward_and_done())
-    #     # done决定重置，用buf2解决；buf代表第一次抓到的步数
-    #     self.progress_buf += (1 - tensordict['next']['caught'])*1
-    #     return tensordict
-
     def random_polar(self, size, radius):
         assert size[-1] == 3 and len(radius)==2
         orient = torch.rand(size, device=self.device) + torch.tensor([-0.5, -0.5, 0.], device=self.device)

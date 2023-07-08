@@ -48,6 +48,7 @@ wandb:
   tags: 
 
 defaults:
-  - task: PlatformHover
+  # - task: PlatformHover
+  - task: PredatorPrey_debug
   - algo: mappo
   - _self_
