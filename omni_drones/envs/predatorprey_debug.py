@@ -109,19 +109,20 @@ class PredatorPrey_debug(IsaacEnv):
         }, self.num_envs)
 
         # TODO, set by yaml
+        self.size = self.cfg.env.env_spacing / 2.0
         self.drone_pos_dist = D.Uniform(
-            torch.tensor([-3.0, -3.0, 1.0], device=self.device),
-            torch.tensor([3.0, 3.0, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
+            torch.tensor([self.size, self.size, 2.0], device=self.device)
         )
         # TODO, set by yaml
         self.target_pos_dist = D.Uniform(
-            torch.tensor([-3.0, -3.0, 1.0], device=self.device),
-            torch.tensor([3.0, 3.0, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
+            torch.tensor([self.size, self.size, 2.0], device=self.device)
         )
         # TODO, set by yaml
         self.obstacles_pos_dist = D.Uniform(
-            torch.tensor([-3.0, -3.0, 1.0], device=self.device),
-            torch.tensor([3.0, 3.0, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
+            torch.tensor([self.size, self.size, 2.0], device=self.device)
         )
 
         # infos
