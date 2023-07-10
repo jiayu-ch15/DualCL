@@ -388,14 +388,18 @@ class PredatorPrey_debug(IsaacEnv):
         force += torch.sum(force_p, dim=1)
 
         # arena
-        # 2D
-        env_center = self.drone._envs_positions[..., :2]
-        distance_center = torch.norm(env_center - prey_pos[..., :2])
-        diretion_r = (env_center - prey_pos[..., :2]) / (distance_center + 1e-5)
-        force_r = diretion_r * (1 / (self.radius - distance_center + 1e-5) - 1 / (self.radius + distance_center))
-        force[..., :2] += torch.sum(force_r, dim=1)
+        # 3D
+        prey_env_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        force_r = torch.zeros_like(force)
+        force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size) + 1e-5) - 1 / (self.size - prey_env_pos[:,0] + 1e-5)
+        force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size) + 1e-5) - 1 / (self.size - prey_env_pos[:,1] + 1e-5)
+        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size - prey_env_pos[:,2] + 1e-5)
         
-        # TODO, the top and bottom force
+        # env_center = self.drone._envs_positions[..., :2]
+        # distance_center = torch.norm(env_center - prey_pos[..., :2])
+        # diretion_r = (env_center - prey_pos[..., :2]) / (distance_center + 1e-5)
+        # force_r = diretion_r * (1 / (self.radius - distance_center + 1e-5) - 1 / (self.radius + distance_center))
+        force += force_r
 
         # obstacles
         if self.num_obstacles > 0:
