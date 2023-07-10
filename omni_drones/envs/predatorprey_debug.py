@@ -86,12 +86,12 @@ class PredatorPrey_debug(IsaacEnv):
             }).to(self.device)
         else:
             observation_spec = CompositeSpec({
-                "state_self": UnboundedContinuousTensorSpec((1, drone_state_dim + self.drone.n)),
-                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13)),
+                "state_self": UnboundedContinuousTensorSpec((1, 3 + drone_state_dim + self.drone.n)),
+                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
             }).to(self.device)
             state_spec = CompositeSpec({
-                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim + self.drone.n)),
+                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + drone_state_dim + self.drone.n)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
             }).to(self.device)
         

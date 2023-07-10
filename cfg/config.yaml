@@ -1,6 +1,6 @@
 # exp
 num_agents: 3
-num_obstacles: 2
+num_obstacles: 0
 size_obstacle: 0.1
 v_drone: 0.5
 v_low: 0.0
