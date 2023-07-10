@@ -180,12 +180,20 @@ class PredatorPrey_debug(IsaacEnv):
             )
         
         # init ground
-        objects.VisualCylinder(
+        # objects.VisualCylinder(
+        #     prim_path="/World/envs/env_0/ground",
+        #     name="ground",
+        #     translation= torch.tensor([0., 0., 0.], device=self.device),
+        #     radius=self.cfg.env.env_spacing/2.0,
+        #     height=0.001,
+        #     color=torch.tensor([0., 0., 0.]),
+        # )
+
+        objects.VisualCuboid(
             prim_path="/World/envs/env_0/ground",
             name="ground",
             translation= torch.tensor([0., 0., 0.], device=self.device),
-            radius=self.cfg.env.env_spacing/2.0,
-            height=0.001,
+            scale=torch.tensor([self.cfg.env.env_spacing, self.cfg.env.env_spacing, 0.001], device=self.device),
             color=torch.tensor([0., 0., 0.]),
         )
     
