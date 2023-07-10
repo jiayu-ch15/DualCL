@@ -56,7 +56,8 @@ class PredatorPrey_debug(IsaacEnv):
 
         self.target_init_vel = self.target.get_velocities(clone=True)
         self.env_ids = torch.from_numpy(np.arange(0, cfg.env.num_envs))
-        self.radius = cfg.env.env_spacing / 2.0
+        self.radius = self.cfg.size
+        self.size = self.cfg.size
         self.caught = self.progress_buf * 0
         self.returns = self.progress_buf * 0
         self.init_poses = self.drone.get_world_poses(clone=True)
@@ -109,7 +110,6 @@ class PredatorPrey_debug(IsaacEnv):
         }, self.num_envs)
 
         # TODO, set by yaml
-        self.size = self.cfg.env.env_spacing / 2.0
         self.drone_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 1.0], device=self.device),
             torch.tensor([self.size, self.size, 2.0], device=self.device)
@@ -138,10 +138,10 @@ class PredatorPrey_debug(IsaacEnv):
         self.num_agents = self.cfg.num_agents
         self.num_obstacles = self.cfg.num_obstacles
         self.size_obstacle = self.cfg.size_obstacle
-        self.radius = self.cfg.env.env_spacing / 2.0
         self.v_low = self.cfg.v_drone * self.cfg.v_low
         self.v_high = self.cfg.v_drone * self.cfg.v_high
         self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
+        self.size = self.cfg.size
 
         # init drone
         drone_model = MultirotorBase.REGISTRY[self.cfg.task.drone_model]
@@ -177,7 +177,7 @@ class PredatorPrey_debug(IsaacEnv):
                 "/World/envs/env_0/obstacle_{}".format(idx), 
                 prim_type="Capsule",
                 translation=obstacle_pos[idx],
-                attributes={"axis": "Y", "radius": 0.04, "height": 5}
+                attributes={"axis": "Z", "radius": self.size_obstacle, "height": 5}
             )
         
         # init ground
@@ -194,7 +194,7 @@ class PredatorPrey_debug(IsaacEnv):
             prim_path="/World/envs/env_0/ground",
             name="ground",
             translation= torch.tensor([0., 0., 0.], device=self.device),
-            scale=torch.tensor([self.cfg.env.env_spacing, self.cfg.env.env_spacing, 0.001], device=self.device),
+            scale=torch.tensor([self.size * 2, self.size * 2, 0.001], device=self.device),
             color=torch.tensor([0., 0., 0.]),
         )
     
