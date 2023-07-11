@@ -91,10 +91,16 @@ def main(cfg):
         k for k in base_env.observation_spec.keys(True, True) 
         if isinstance(k, tuple) and k[0]=="stats"
     ]
+
+    info_keys = [
+        k for k in base_env.observation_spec.keys(True, True) 
+        if isinstance(k, tuple) and k[0]=="info"
+    ]
+
     logger = LogOnEpisode(
         cfg.env.num_envs,
-        in_keys=["return", "return", "progress", *stats_keys],
-        log_keys=["return", "return_std", "ep_length", *stats_keys],
+        in_keys=["return", "return", "progress", *stats_keys, *info_keys],
+        log_keys=["return", "return_std", "ep_length", *stats_keys, *info_keys],
         logger_func=log,
         process_func={"return_std": lambda x: torch.std(x).item()}
     )

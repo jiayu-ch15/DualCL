@@ -68,31 +68,31 @@ class PredatorPrey_debug(IsaacEnv):
         self.random_idx = torch.ones(self.num_envs, device=self.device)
         
         drone_state_dim = self.drone.state_spec.shape.numel()
-        frame_state_dim = 3 # target_dim
+        frame_state_dim = 9 # target_pos_dim + target_vel
         if self.time_encoding:
             self.time_encoding_dim = 4
             frame_state_dim += self.time_encoding_dim        
 
         if self.num_obstacles > 0:
             observation_spec = CompositeSpec({
-                "state_self": UnboundedContinuousTensorSpec((1, 3 + drone_state_dim + self.drone.n)),
+                "state_self": UnboundedContinuousTensorSpec((1, 3 + 6 + drone_state_dim + self.drone.n)),
                 "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
                 "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 3)),
             }).to(self.device)
             state_spec = CompositeSpec({
-                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + drone_state_dim + self.drone.n)),
+                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + 6 + drone_state_dim + self.drone.n)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
                 "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 3)),
             }).to(self.device)
         else:
             observation_spec = CompositeSpec({
-                "state_self": UnboundedContinuousTensorSpec((1, 3 + drone_state_dim + self.drone.n)),
+                "state_self": UnboundedContinuousTensorSpec((1, 3 + 6 + drone_state_dim + self.drone.n)),
                 "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
             }).to(self.device)
             state_spec = CompositeSpec({
-                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + drone_state_dim + self.drone.n)),
+                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + 6 + drone_state_dim + self.drone.n)),
                 "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
             }).to(self.device)
         
@@ -130,6 +130,8 @@ class PredatorPrey_debug(IsaacEnv):
             "capture": UnboundedContinuousTensorSpec(1),
             "capture_per_step": UnboundedContinuousTensorSpec(1),
             "return": UnboundedContinuousTensorSpec(1),
+            "drone_speed": UnboundedContinuousTensorSpec(1),
+            "prey_speed": UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["info"] = info_spec
         self.info = info_spec.zero()
@@ -258,26 +260,32 @@ class PredatorPrey_debug(IsaacEnv):
         drone_pos = self.drone_states[..., :3]
         self.drone_rpos = vmap(cpos)(drone_pos, drone_pos)
         self.drone_rpos = vmap(off_diag)(self.drone_rpos)
+        drone_vel = self.drone.get_velocities()
+        self.info["drone_speed"].set_(torch.mean(torch.norm(drone_vel[..., :3], dim=1),dim=1).unsqueeze(1))
         
         target_pos, _ = self.get_env_poses(self.target.get_world_poses())
         target_pos = target_pos.unsqueeze(1)
+        target_vel = self.target.get_velocities()
+        self.info["prey_speed"].set_(torch.norm(target_vel[:, :3], dim=1).unsqueeze(1))
         target_rpos = target_pos - self.drone_states[..., :3]
         if self.time_encoding:
             t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
             target_state = torch.cat([
                 target_pos,
+                target_vel.unsqueeze(1),
                 t.expand(-1, self.time_encoding_dim).unsqueeze(1)
             ], dim=-1) # [num_envs, 1, 25+time_encoding_dim]
         else:
             target_state = torch.cat([
-                target_pos
+                target_pos,
+                target_vel.unsqueeze(1)
             ], dim=-1) # [num_envs, 1, 25]
 
         identity = torch.eye(self.drone.n, device=self.device).expand(self.num_envs, -1, -1)
 
         obs = TensorDict({}, [self.num_envs, self.drone.n])
         obs["state_self"] = torch.cat(
-            [-target_rpos, self.drone_states, identity], dim=-1
+            [-target_rpos, target_vel.unsqueeze(1).expand(-1, self.drone.n, -1), self.drone_states, identity], dim=-1
         ).unsqueeze(2)
         obs["state_others"] = self.drone_rpos
         obs["state_frame"] = target_state.unsqueeze(1).expand(-1, self.drone.n, 1, -1)
