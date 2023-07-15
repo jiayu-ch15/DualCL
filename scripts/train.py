@@ -160,8 +160,8 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-    # camera.spawn(["/World/Camera"], translations=[(0.0, 0.0, 15)], targets=[(0, 0, 0.5)])
-    camera.spawn(["/World/Camera"], translations=[(7.5, 7.5, 7.5)], targets=[(0, 0, 0.5)])
+    camera.spawn(["/World/Camera"], translations=[(0.0, 0, 12)], targets=[(0, 0, 0.5)])
+    # camera.spawn(["/World/Camera"], translations=[(7.5, 7.5, 7.5)], targets=[(0, 0, 0.5)])
     camera.initialize("/World/Camera")
 
     # TODO: create a agent_spec view for TransformedEnv
@@ -176,6 +176,10 @@ def main(cfg):
     policy = algos[cfg.algo.name.lower()](
         cfg.algo, agent_spec=agent_spec, device="cuda"
     )
+    
+    if cfg.model_dir is not None:
+        policy.load_state_dict(torch.load(cfg.model_dir))
+        print("Successfully load model!")
 
     frames_per_batch = env.num_envs * int(cfg.algo.train_every)
     total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
