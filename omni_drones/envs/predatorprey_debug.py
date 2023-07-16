@@ -391,11 +391,14 @@ class PredatorPrey_debug(IsaacEnv):
         force = torch.zeros(self.num_envs, 3, device=self.device)
 
         # predators
+        # active mask : if drone is failed, do not get force from it
+        drone_vel = self.drone.get_velocities()
+        active_mask = (torch.norm(drone_vel[...,:3],dim=-1) <= 1e-5).unsqueeze(-1).expand(-1,-1,3)
         prey_pos_all = prey_pos.expand(-1,self.num_agents,-1)
         dist_pos = torch.norm(prey_pos_all - pos,dim=-1).unsqueeze(-1).expand(-1,-1,3)
         direction_p = (prey_pos_all - pos) / (dist_pos + 1e-5)
         # orient = self.normalize(prey_pos - pos)
-        force_p = direction_p * (1 / (dist_pos + 1e-5))
+        force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
         force += torch.sum(force_p, dim=1)
 
         # arena
