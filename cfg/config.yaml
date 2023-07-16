@@ -1,6 +1,6 @@
 # exp
 num_agents: 3
-num_obstacles: 2
+num_obstacles: 0
 size_obstacle: 0.2
 v_drone: 0.5
 v_low: 1.3
@@ -29,13 +29,13 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  # run_name: 2obstacle_size2_speed1_3_usecollision
+  # run_name: 0obstacle_size2_speed1_8_usecollision
   run_name: debug
   job_type: train
   entity: chenjy
   project: issac_drones
-  # mode: online # set to 'disabled' when debugging locally
-  mode: disabled
+  mode: online # set to 'disabled' when debugging locally
+  # mode: disabled
   run_id: 
   monitor_gym: True
   tags: 
