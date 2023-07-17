@@ -160,7 +160,7 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-    camera.spawn(["/World/Camera"], translations=[(0.0, 0, 12)], targets=[(0, 0, 0.5)])
+    camera.spawn(["/World/Camera"], translations=[(0.0, 0, 15)], targets=[(0, 0, 0.5)])
     # camera.spawn(["/World/Camera"], translations=[(7.5, 7.5, 7.5)], targets=[(0, 0, 0.5)])
     camera.initialize("/World/Camera")
 
