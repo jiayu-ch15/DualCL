@@ -60,6 +60,8 @@ class PredatorPrey_debug(IsaacEnv):
         self.size = self.cfg.size
         self.caught = self.progress_buf * 0
         self.returns = self.progress_buf * 0
+        self.catch_radius = self.cfg.catch_radius
+        self.collision_radius = self.cfg.collision_radius
         self.init_poses = self.drone.get_world_poses(clone=True)
 
         # CL
@@ -316,7 +318,7 @@ class PredatorPrey_debug(IsaacEnv):
 
         target_dist = torch.norm(target_pos - drone_pos, dim=-1)
 
-        capture_flag = (target_dist < 0.12)
+        capture_flag = (target_dist < self.catch_radius)
         self.info['capture'].set_((self.info['capture'] + torch.any(capture_flag, dim=1).unsqueeze(-1)))
         self.info['capture_per_step'].add_(torch.any(capture_flag, dim=1).unsqueeze(-1))
         catch_reward = 10 * capture_flag # sparse
@@ -330,7 +332,7 @@ class PredatorPrey_debug(IsaacEnv):
             for i in range(self.num_obstacles):
                 relative_pos = drone_pos[..., :2] - obstacle_pos[:, i, :2].unsqueeze(-2)
                 norm_r = torch.norm(relative_pos, dim=-1)
-                if_coll = (norm_r < 0.2).type(torch.float32)
+                if_coll = (norm_r < self.collision_radius).type(torch.float32)
                 # self.coll_times += if_coll
                 coll_reward -= if_coll # sparse
                 # self.collided = 1.0 * ((self.collided + if_coll) > 0)

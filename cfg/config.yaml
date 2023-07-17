@@ -3,14 +3,13 @@ num_agents: 3
 num_obstacles: 0
 size_obstacle: 0.2
 v_drone: 0.5
-v_low: 1.3
-v_high: 1.3
+v_low: 1.8
+v_high: 1.8
 size: 2.0
 model_dir: null
 use_collision: 1
-
 catch_radius: 0.1
-
+collision_radius: 0.1
 
 headless: true
 
@@ -34,8 +33,8 @@ wandb:
   job_type: train
   entity: chenjy
   project: issac_drones
-  mode: online # set to 'disabled' when debugging locally
-  # mode: disabled
+  # mode: online # set to 'disabled' when debugging locally
+  mode: disabled
   run_id: 
   monitor_gym: True
   tags: 
