@@ -381,7 +381,7 @@ class MAPPOPolicy(object):
         return state_dict
     
     def load_state_dict(self, state_dict):
-        self.actor_params.copy_(state_dict["actor_params"])
+        self.actor_params = state_dict["actor_params"]
         self.critic.load_state_dict(state_dict["critic"])
         self.value_normalizer.load_state_dict(state_dict["value_normalizer"])
 

@@ -178,6 +178,7 @@ def main(cfg):
     )
     
     if cfg.model_dir is not None:
+        # torch.save(policy.state_dict(), ckpt_path)
         policy.load_state_dict(torch.load(cfg.model_dir))
         print("Successfully load model!")
 
