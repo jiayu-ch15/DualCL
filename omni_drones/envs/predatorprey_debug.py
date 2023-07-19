@@ -113,18 +113,18 @@ class PredatorPrey_debug(IsaacEnv):
 
         # TODO, set by yaml
         self.drone_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
-            torch.tensor([self.size, self.size, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
         )
         # TODO, set by yaml
         self.target_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
-            torch.tensor([self.size, self.size, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
         )
         # TODO, set by yaml
         self.obstacles_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 1.0], device=self.device),
-            torch.tensor([self.size, self.size, 2.0], device=self.device)
+            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+            torch.tensor([self.size, self.size, 0.5], device=self.device)
         )
 
         # infos
@@ -440,7 +440,7 @@ class PredatorPrey_debug(IsaacEnv):
             force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
-        force[..., 2] = 0
+        # force[..., 2] = 0
         return force.type(torch.float32)
     
     # def random_polar(self, size, radius):

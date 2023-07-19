@@ -5,8 +5,9 @@ size_obstacle: 0.2
 v_drone: 0.5
 v_low: 1.3
 v_high: 1.3
-size: 2.0
-model_dir: /root/OmniDrones/scripts/outputs/0obstacle_size2_speed1_3_capture01/07-18_04-49/wandb/run-20230718_044948-6g60xobi/files/checkpoint_327811072.pt
+size: 1.0
+# model_dir: /root/OmniDrones/scripts/outputs/0obstacle_size1_speed1_3_capture01/07-19_05-39/wandb/run-20230719_053941-6qc8orri/files/checkpoint_209977344.pt
+model_dir: null
 use_collision: 1
 catch_radius: 0.1
 collision_radius: 0.1
@@ -28,7 +29,7 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: 0obstacle_size2_speed1_3_capture01_loadspeed1_3_check
+  run_name: 0obstacle_size1_speed1_3_capture01
   # run_name: debug
   job_type: train
   entity: chenjy
