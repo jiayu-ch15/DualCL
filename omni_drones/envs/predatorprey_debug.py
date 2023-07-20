@@ -134,11 +134,8 @@ class PredatorPrey_debug(IsaacEnv):
             "capture_per_step": UnboundedContinuousTensorSpec(1),
             "return": UnboundedContinuousTensorSpec(1),
             "drone1_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone1_speed_episode": UnboundedContinuousTensorSpec(1),
             "drone2_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone2_speed_episode": UnboundedContinuousTensorSpec(1),
             "drone3_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone3_speed_episode": UnboundedContinuousTensorSpec(1),
             "prey_speed": UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["info"] = info_spec
@@ -233,6 +230,8 @@ class PredatorPrey_debug(IsaacEnv):
         )
         drone_init_velocities = torch.zeros_like(self.drone.get_velocities())
         self.drone.set_velocities(torch.zeros_like(drone_init_velocities), env_ids)
+        
+        self.drone_sum_speed = drone_init_velocities[...,0].squeeze(-1)
 
         # obstalces
         if self.num_obstacles > 0:
@@ -256,11 +255,8 @@ class PredatorPrey_debug(IsaacEnv):
             "capture_per_step": UnboundedContinuousTensorSpec(1),
             "return": UnboundedContinuousTensorSpec(1),
             "drone1_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone1_speed_episode": UnboundedContinuousTensorSpec(1),
             "drone2_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone2_speed_episode": UnboundedContinuousTensorSpec(1),
             "drone3_speed_per_step": UnboundedContinuousTensorSpec(1),
-            "drone3_speed_episode": UnboundedContinuousTensorSpec(1),
             "prey_speed": UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.info = info_spec.zero()
@@ -286,18 +282,16 @@ class PredatorPrey_debug(IsaacEnv):
         self.drone_rpos = vmap(off_diag)(self.drone_rpos)
         drone_vel = self.drone.get_velocities()
         
-        drone_speed_norm = torch.norm(drone_vel[..., :3], dim=1)
-        self.info["drone1_speed_episode"].add_(drone_speed_norm[:,0].unsqueeze(-1))
-        self.info["drone2_speed_episode"].add_(drone_speed_norm[:,1].unsqueeze(-1))
-        self.info["drone3_speed_episode"].add_(drone_speed_norm[:,2].unsqueeze(-1))
-        self.info['drone1_speed_per_step'].set_(self.info['drone1_speed_episode'] / self.step_spec)
-        self.info['drone2_speed_per_step'].set_(self.info['drone2_speed_episode'] / self.step_spec)
-        self.info['drone3_speed_per_step'].set_(self.info['drone3_speed_episode'] / self.step_spec)
+        drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
+        self.drone_sum_speed += drone_speed_norm
+        self.info['drone1_speed_per_step'].set_(self.drone_sum_speed[:,0].unsqueeze(-1) / self.step_spec)
+        self.info['drone2_speed_per_step'].set_(self.drone_sum_speed[:,1].unsqueeze(-1) / self.step_spec)
+        self.info['drone3_speed_per_step'].set_(self.drone_sum_speed[:,2].unsqueeze(-1) / self.step_spec)
         
         target_pos, _ = self.get_env_poses(self.target.get_world_poses())
         target_pos = target_pos.unsqueeze(1)
         target_vel = self.target.get_velocities()
-        self.info["prey_speed"].set_(torch.norm(target_vel[:, :3], dim=1).unsqueeze(1))
+        self.info["prey_speed"].set_(torch.norm(target_vel[:, :3], dim=-1).unsqueeze(-1))
         target_rpos = target_pos - self.drone_states[..., :3]
         if self.time_encoding:
             t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
@@ -351,8 +345,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.info['capture_episode'].add_(torch.sum(capture_flag, dim=1).unsqueeze(-1))
         self.info['capture'].set_(torch.from_numpy(self.info['capture_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
         self.info['capture_per_step'].set_(self.info['capture_episode'] / self.step_spec)
-        catch_reward = 10 * capture_flag # sparse
-        catch_reward = 10 * catch_reward.sum(-1).unsqueeze(-1).expand_as(catch_reward)
+        catch_reward = 10 * capture_flag.sum(-1).unsqueeze(-1).expand_as(capture_flag)
 
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
@@ -369,7 +362,8 @@ class PredatorPrey_debug(IsaacEnv):
 
         # distance reward
         min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
-        distance_reward = - 1.0 * min_dist
+        dist_reward_mask = (min_dist > self.catch_radius)
+        distance_reward = - 1.0 * min_dist * dist_reward_mask
 
         if self.cfg.use_collision:
             reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
@@ -429,9 +423,9 @@ class PredatorPrey_debug(IsaacEnv):
         prey_pos_all = prey_pos.expand(-1,self.num_agents,-1)
         dist_pos = torch.norm(prey_pos_all - pos,dim=-1).unsqueeze(-1).expand(-1,-1,3)
         direction_p = (prey_pos_all - pos) / (dist_pos + 1e-5)
-        # orient = self.normalize(prey_pos - pos)
         force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
-        force += torch.sum(force_p, dim=1)
+        # TODO: wo predator
+        # force += torch.sum(force_p, dim=1)
 
         # arena
         # 3D
