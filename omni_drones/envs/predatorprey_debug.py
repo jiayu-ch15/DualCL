@@ -368,13 +368,15 @@ class PredatorPrey_debug(IsaacEnv):
                 # self.collided = 1.0 * ((self.collided + if_coll) > 0)
 
         # distance reward
-        # min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
-        # distance_reward = - 1.0 * min_dist
+        min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
+        distance_reward = - 1.0 * min_dist
+        
+        import pdb;pdb.set_trace()
 
         if self.cfg.use_collision:
-            reward = 1.0 * catch_reward + 5 * coll_reward
+            reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
         else:
-            reward = 1.0 * catch_reward
+            reward = 1.0 * catch_reward + 1.0 * distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].sum(1)
