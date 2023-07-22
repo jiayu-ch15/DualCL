@@ -382,11 +382,6 @@ class PredatorPrey_debug(IsaacEnv):
         self.caught = (self.progress_buf > 0) * ((self.caught + caught.any(-1)) > 0)
         self.progress_std = torch.std(self.progress_buf)
 
-        self.random_success = torch.sum(self.random_idx * self.caught) / (torch.sum(self.random_idx) + 1e-5) * 100
-        self.train_success = torch.sum(self.caught * (1 - self.random_idx)) / (torch.sum(1 - self.random_idx) + 1e-5) * 100
-        self.success = torch.sum(self.caught) / self.num_envs * 100
-        # num_level = len(self.goals.buffer)*torch.ones(self.num_envs, device=self.device)
-
         return TensorDict({
             "reward": {
                 "drone.reward": reward.unsqueeze(-1)
@@ -423,9 +418,9 @@ class PredatorPrey_debug(IsaacEnv):
         prey_pos_all = prey_pos.expand(-1,self.num_agents,-1)
         dist_pos = torch.norm(prey_pos_all - pos,dim=-1).unsqueeze(-1).expand(-1,-1,3)
         direction_p = (prey_pos_all - pos) / (dist_pos + 1e-5)
-        force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
-        # TODO: wo predator
-        # force += torch.sum(force_p, dim=1)
+        # force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
+        force_p = direction_p * (1 / (dist_pos + 1e-5))
+        force += torch.sum(force_p, dim=1)
 
         # arena
         # 3D
@@ -451,7 +446,8 @@ class PredatorPrey_debug(IsaacEnv):
             force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
-        # force[..., 2] = 0
+        if not self.cfg.use_z_axis:
+            force[..., 2] = 0
         return force.type(torch.float32)
     
     # def random_polar(self, size, radius):
