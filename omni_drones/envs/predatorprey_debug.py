@@ -431,11 +431,6 @@ class PredatorPrey_debug(IsaacEnv):
         self.caught = (self.progress_buf > 0) * ((self.caught + caught.any(-1)) > 0)
         self.progress_std = torch.std(self.progress_buf)
 
-        self.random_success = torch.sum(self.random_idx * self.caught) / (torch.sum(self.random_idx) + 1e-5) * 100
-        self.train_success = torch.sum(self.caught * (1 - self.random_idx)) / (torch.sum(1 - self.random_idx) + 1e-5) * 100
-        self.success = torch.sum(self.caught) / self.num_envs * 100
-        # num_level = len(self.goals.buffer)*torch.ones(self.num_envs, device=self.device)
-
         return TensorDict({
             "reward": {
                 "drone.reward": reward.unsqueeze(-1)
@@ -500,6 +495,7 @@ class PredatorPrey_debug(IsaacEnv):
             force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
-        # force[..., 2] = 0
+        if not self.cfg.use_z_axis:
+            force[..., 2] = 0
         return force.type(torch.float32)
     
