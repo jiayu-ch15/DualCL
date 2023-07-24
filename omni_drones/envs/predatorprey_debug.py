@@ -30,7 +30,66 @@ from .utils import create_obstacle
 
 # drones on land by default
 # only cubes are available as walls
-# clip state as walls
+
+class CurriculumBuffer(object):
+
+    def __init__(self, buffer_size, scenario='mpe'):
+        self.eps = 1e-10
+        self.buffer_size = buffer_size
+        self.scenario = scenario
+
+        self._state_buffer = np.zeros((0, 1), dtype=np.float32)
+        self._weight_buffer = np.zeros((0, 1), dtype=np.float32)
+        self._task_space = []
+        self._temp_state_buffer = []
+        self._moving_max = 0.0
+        self._moving_min = 0.0
+
+    def insert(self, states):
+        """
+        input:
+            states: list of np.array(size=(state_dim, ))
+            weight: list of np.array(size=(1, ))
+        """
+        self._temp_state_buffer.append(copy.deepcopy(states))
+
+    def update_states(self):
+        start_time = time.time()
+
+        # concatenate to get all states
+        all_states = np.array(self._temp_state_buffer)
+
+        # update
+        if len(all_states) > 0:
+            self._state_buffer = copy.deepcopy(all_states)
+        # reset temp state and weight buffer
+        self._temp_state_buffer = []
+
+        # print update time
+        end_time = time.time()
+        print(f"curriculum buffer update states time: {end_time - start_time}s")
+
+        return self._state_buffer.copy()
+
+    def update_weights(self, weights):
+        self._weight_buffer = weights.copy()
+
+    def sample(self, num_samples):
+        """
+        return list of np.array
+        """
+        if self._state_buffer.shape[0] == 0:  # state buffer is empty
+            initial_states = [None for _ in range(num_samples)]
+        else:
+            weights = self._weight_buffer / np.mean(self._weight_buffer)
+            probs = weights / np.sum(weights)
+            sample_idx = np.random.choice(self._state_buffer.shape[0], num_samples, replace=True, p=probs)
+            initial_states = [self._state_buffer[idx] for idx in sample_idx]
+        return initial_states
+    
+    def save_task(self, model_dir, episode):
+        np.save('{}/tasks_{}.npy'.format(model_dir,episode), self._state_buffer)
+        np.save('{}/scores_{}.npy'.format(model_dir,episode), self._weight_buffer)
 
 class PredatorPrey_debug(IsaacEnv): 
     def __init__(self, cfg, headless):
@@ -187,16 +246,6 @@ class PredatorPrey_debug(IsaacEnv):
                 attributes={"axis": "Z", "radius": self.size_obstacle, "height": 5}
             )
         
-        # init ground
-        # objects.VisualCylinder(
-        #     prim_path="/World/envs/env_0/ground",
-        #     name="ground",
-        #     translation= torch.tensor([0., 0., 0.], device=self.device),
-        #     radius=self.cfg.env.env_spacing/2.0,
-        #     height=0.001,
-        #     color=torch.tensor([0., 0., 0.]),
-        # )
-
         objects.VisualCuboid(
             prim_path="/World/envs/env_0/ground",
             name="ground",
@@ -423,9 +472,9 @@ class PredatorPrey_debug(IsaacEnv):
         prey_pos_all = prey_pos.expand(-1,self.num_agents,-1)
         dist_pos = torch.norm(prey_pos_all - pos,dim=-1).unsqueeze(-1).expand(-1,-1,3)
         direction_p = (prey_pos_all - pos) / (dist_pos + 1e-5)
-        force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
-        # TODO: wo predator
-        # force += torch.sum(force_p, dim=1)
+        # force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
+        force_p = direction_p * (1 / (dist_pos + 1e-5))
+        force += torch.sum(force_p, dim=1)
 
         # arena
         # 3D
@@ -454,83 +503,3 @@ class PredatorPrey_debug(IsaacEnv):
         # force[..., 2] = 0
         return force.type(torch.float32)
     
-    # def random_polar(self, size, radius):
-    #     assert size[-1] == 3 and len(radius)==2
-    #     orient = torch.rand(size, device=self.device) + torch.tensor([-0.5, -0.5, 0.], device=self.device)
-    #     orient[..., 2] = 0.
-    #     orient /= 1e-7 + torch.norm(orient, dim = -1).unsqueeze(-1).expand_as(orient)
-    #     pos = orient * torch.from_numpy(np.random.uniform(radius[0], radius[1], size[:-1]+[1])).to(self.device).expand_as(orient)
-    #     return pos.type(torch.float32)
-    
-    # def create_goalproposal_mix(self):
-    #     buffer_length = self.num_envs*50 #for debugging
-    #     device = self.device
-    #     proposal_batch = self.num_envs  #right
-    #     goals = rsp.goal_proposal_return(
-    #         config=None, env_name=None, scenario_name=None, critic_k=1, 
-    #         buffer_capacity=buffer_length, proposal_batch=proposal_batch, device=device, score_type='value_error')
-    #     return goals
-
-    # def plot_buffer(self, step=0.1):
-    #     buffer = np.array(self.goals.buffer)
-    #     if len(buffer) == 0:
-    #         buffer = np.array([1.3])
-    #     else:
-    #         buffer /= self.cfg.v_drone
-    #     level = np.linspace(1.3, 5.0, 38)
-    #     times = [(abs(buffer - v) < 0.5*step).sum() for v in level]
-    #     plt.figure()
-    #     plt.plot(level, times)
-    #     plt.savefig('buffer_num.png')
-    #     return {"buffer": wandb.Plotly(plt.gcf())}
-    
-    # def print_success(self, x, suc, ran):
-    #     assert x.size()[0]==suc.size()[0]
-    #     result = []
-    #     suc = (suc > 0)*1.0
-    #     for v in ran:
-    #         mask = torch.abs(x-v)<0.05
-    #         sv = torch.sum(suc * mask.squeeze(-1)) / torch.sum(mask)*100
-    #         result.append(sv)
-    #         print(v, ': ', sv)
-    #     return result
-    
-    # def class_success2(self, x, suc, ran, near):
-    #     assert x.size()==suc.size()
-    #     L = x.size()[0]
-    #     suc = (suc > 0)*1.0
-    #     y = suc*0
-    #     rate = []
-    #     x1 = x.unsqueeze(0).expand(L, -1)
-    #     x2 = x.unsqueeze(-1).expand(-1, L)
-    #     x_in = torch.abs(x1 - x2) < near
-    #     suc1 = suc.unsqueeze(0).expand(L, -1)
-    #     suc_in = suc1 * x_in
-    #     y = torch.sum(suc_in, -1)/(torch.sum(x_in, -1) + 1e-9)
-    #     for v in ran:
-    #         mask = torch.abs(x-v) < near
-    #         sv = torch.sum(suc * mask.squeeze(-1)) / (torch.sum(mask) + 1e-9) * 100
-    #         rate.append(sv.cpu())
-    #     plt.figure()
-    #     plt.plot(ran, rate)
-    #     plt.savefig('buffer.png')
-    #     plt.figure()
-    #     plt.scatter(x.cpu().numpy(), y.cpu().numpy())
-    #     plt.savefig('rate.png')
-    #     return y
-    
-    # def class_success(self, x, suc, ran, near):
-    #     assert x.size()==suc.size()
-    #     suc = (suc > 0)*1.0
-    #     y = suc*0
-    #     rate = []
-    #     # 离散化
-    #     for v in ran:
-    #         mask = torch.abs(x-v) < near
-    #         sv = torch.sum(suc * mask.squeeze(-1)) / (torch.sum(mask) + 1e-9)
-    #         y += mask * sv
-    #         rate.append(sv.cpu())
-    #     plt.figure()
-    #     plt.plot(ran, rate)
-    #     plt.savefig('buffer.png')
-    #     return y
