@@ -195,6 +195,9 @@ class PredatorPrey_debug(IsaacEnv):
             "drone1_speed_per_step": UnboundedContinuousTensorSpec(1),
             "drone2_speed_per_step": UnboundedContinuousTensorSpec(1),
             "drone3_speed_per_step": UnboundedContinuousTensorSpec(1),
+            "drone1_max_speed": UnboundedContinuousTensorSpec(1),
+            "drone2_max_speed": UnboundedContinuousTensorSpec(1),
+            "drone3_max_speed": UnboundedContinuousTensorSpec(1),
             "prey_speed": UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["info"] = info_spec
@@ -281,6 +284,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.drone.set_velocities(torch.zeros_like(drone_init_velocities), env_ids)
         
         self.drone_sum_speed = drone_init_velocities[...,0].squeeze(-1)
+        self.drone_max_speed = drone_init_velocities[...,0].squeeze(-1)
 
         # obstalces
         if self.num_obstacles > 0:
@@ -306,6 +310,9 @@ class PredatorPrey_debug(IsaacEnv):
             "drone1_speed_per_step": UnboundedContinuousTensorSpec(1),
             "drone2_speed_per_step": UnboundedContinuousTensorSpec(1),
             "drone3_speed_per_step": UnboundedContinuousTensorSpec(1),
+            "drone1_max_speed": UnboundedContinuousTensorSpec(1),
+            "drone2_max_speed": UnboundedContinuousTensorSpec(1),
+            "drone3_max_speed": UnboundedContinuousTensorSpec(1),
             "prey_speed": UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.info = info_spec.zero()
@@ -333,9 +340,13 @@ class PredatorPrey_debug(IsaacEnv):
         
         drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
         self.drone_sum_speed += drone_speed_norm
+        self.drone_max_speed = torch.max(torch.stack([self.drone_max_speed, drone_speed_norm], dim=-1), dim=-1).values
         self.info['drone1_speed_per_step'].set_(self.drone_sum_speed[:,0].unsqueeze(-1) / self.step_spec)
         self.info['drone2_speed_per_step'].set_(self.drone_sum_speed[:,1].unsqueeze(-1) / self.step_spec)
         self.info['drone3_speed_per_step'].set_(self.drone_sum_speed[:,2].unsqueeze(-1) / self.step_spec)
+        self.info['drone1_max_speed'].set_(self.drone_max_speed[:,0].unsqueeze(-1))
+        self.info['drone2_max_speed'].set_(self.drone_max_speed[:,1].unsqueeze(-1))
+        self.info['drone3_max_speed'].set_(self.drone_max_speed[:,2].unsqueeze(-1))
         
         target_pos, _ = self.get_env_poses(self.target.get_world_poses())
         target_pos = target_pos.unsqueeze(1)
@@ -396,6 +407,11 @@ class PredatorPrey_debug(IsaacEnv):
         self.info['capture_per_step'].set_(self.info['capture_episode'] / self.step_spec)
         catch_reward = 10 * capture_flag.sum(-1).unsqueeze(-1).expand_as(capture_flag)
 
+        # upper bound for drone_velocity
+        drone_vel = self.drone.get_velocities()
+        drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
+        upper_bound_reward = - 100 * (drone_speed_norm >= self.cfg.v_drone)
+
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
         
@@ -415,9 +431,9 @@ class PredatorPrey_debug(IsaacEnv):
         distance_reward = - 1.0 * min_dist * dist_reward_mask
 
         if self.cfg.use_collision:
-            reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
+            reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
         else:
-            reward = 1.0 * catch_reward + 1.0 * distance_reward
+            reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].sum(1)
@@ -495,7 +511,5 @@ class PredatorPrey_debug(IsaacEnv):
             force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
-        if not self.cfg.use_z_axis:
-            force[..., 2] = 0
         return force.type(torch.float32)
     
