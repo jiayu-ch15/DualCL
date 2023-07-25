@@ -170,20 +170,19 @@ class PredatorPrey_debug(IsaacEnv):
             "max_linvel": torch.ones(self.num_envs, 1, device=self.device)
         }, self.num_envs)
 
-        # TODO, set by yaml
         self.drone_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
+            torch.tensor([self.size, self.size, 0.0], device=self.device)
         )
-        # TODO, set by yaml
+
         self.target_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 0.0], device=self.device),
             torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
         )
-        # TODO, set by yaml
+
         self.obstacles_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 0.5], device=self.device)
+            torch.tensor([self.size, self.size, 0.0], device=self.device)
         )
 
         # infos
