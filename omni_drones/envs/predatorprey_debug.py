@@ -172,7 +172,7 @@ class PredatorPrey_debug(IsaacEnv):
 
         self.drone_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 0.0], device=self.device)
+            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
         )
 
         self.target_pos_dist = D.Uniform(
@@ -430,9 +430,15 @@ class PredatorPrey_debug(IsaacEnv):
         distance_reward = - 1.0 * min_dist * dist_reward_mask
 
         if self.cfg.use_collision:
-            reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
+            if self.cfg.use_speed_penalty:
+                reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
+            else:
+                reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
         else:
-            reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward
+            if self.cfg.use_speed_penalty:
+                reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward
+            else:
+                reward = 1.0 * catch_reward + 1.0 * distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].sum(1)
