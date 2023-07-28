@@ -9,7 +9,7 @@ size: 0.5
 # model_dir: /root/OmniDrones/scripts/outputs/0obstacle_size05_speed1_3_capture02_wopredator_force/07-21_09-35/wandb/run-20230721_093546-gff015vs/files/checkpoint_419692544.pt
 model_dir: null
 use_collision: 1
-use_speed_penalty: 0
+from_ground: 0
 catch_radius: 0.1
 collision_radius: 0.01
 
@@ -30,7 +30,7 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: 0obstacle_size05_speed1_3_dronevel1_fromground_wospeedpenalty
+  run_name: 0obstacle_size05_speed1_3_from
   # run_name: debug
   job_type: train
   entity: chenjy

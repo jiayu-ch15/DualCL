@@ -170,10 +170,16 @@ class PredatorPrey_debug(IsaacEnv):
             "max_linvel": torch.ones(self.num_envs, 1, device=self.device)
         }, self.num_envs)
 
-        self.drone_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
-        )
+        if self.cfg.from_ground:
+            self.drone_pos_dist = D.Uniform(
+                torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+                torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
+            )
+        else:
+            self.drone_pos_dist = D.Uniform(
+                torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+                torch.tensor([self.size, self.size, 0.0], device=self.device)
+            )
 
         self.target_pos_dist = D.Uniform(
             torch.tensor([-self.size, -self.size, 0.0], device=self.device),
@@ -406,11 +412,6 @@ class PredatorPrey_debug(IsaacEnv):
         self.info['capture_per_step'].set_(self.info['capture_episode'] / self.step_spec)
         catch_reward = 10 * capture_flag.sum(-1).unsqueeze(-1).expand_as(capture_flag)
 
-        # upper bound for drone_velocity
-        drone_vel = self.drone.get_velocities()
-        drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
-        upper_bound_reward = - 100 * (drone_speed_norm >= self.cfg.v_drone)
-
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
         
@@ -430,15 +431,9 @@ class PredatorPrey_debug(IsaacEnv):
         distance_reward = - 1.0 * min_dist * dist_reward_mask
 
         if self.cfg.use_collision:
-            if self.cfg.use_speed_penalty:
-                reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
-            else:
-                reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
+            reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
         else:
-            if self.cfg.use_speed_penalty:
-                reward = 1.0 * upper_bound_reward + 1.0 * catch_reward + 1.0 * distance_reward
-            else:
-                reward = 1.0 * catch_reward + 1.0 * distance_reward
+            reward = 1.0 * catch_reward + 1.0 * distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].sum(1)
