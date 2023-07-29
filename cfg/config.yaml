@@ -1,5 +1,5 @@
 # exp
-num_agents: 3
+num_agents: 4
 num_obstacles: 0
 size_obstacle: 0.2
 v_drone: 0.5
@@ -30,7 +30,7 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: 0obstacle_size05_speed1_3_from
+  run_name: thread2048_4agent_0obstacle_size05_speed1_3_fromair
   # run_name: debug
   job_type: train
   entity: chenjy
