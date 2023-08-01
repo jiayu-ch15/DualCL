@@ -180,7 +180,6 @@ def main(cfg):
         # torch.save(policy.state_dict(), ckpt_path)
         policy.load_state_dict(torch.load(cfg.model_dir))
         print("Successfully load model!")
-    # import pdb; pdb.set_trace()
 
     frames_per_batch = env.num_envs * int(cfg.algo.train_every)
     total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
@@ -252,7 +251,6 @@ def main(cfg):
 
         if max_iters > 0 and i >= max_iters - 1:
             break 
-        import pdb; pdb.set_trace()
     
     logging.info(f"Final Eval at {collector._frames} steps.")
     info = {"env_frames": collector._frames}

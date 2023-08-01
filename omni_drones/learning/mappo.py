@@ -117,12 +117,10 @@ class MAPPOPolicy(object):
         if self.cfg.share_actor:
             self.actor = create_actor_fn()
             self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=cfg.lr)
-            self.actor_params = make_functional(self.actor).expand(self.agent_spec.n)
         else:
             actors = nn.ModuleList([create_actor_fn() for _ in range(self.agent_spec.n)])
             self.actor = actors[0]
             self.actor_opt = torch.optim.Adam(actors.parameters(), lr=cfg.lr)
-            self.actor_params = torch.stack([make_functional(actor) for actor in actors])
 
     def make_critic(self):
         cfg = self.cfg.critic
@@ -208,8 +206,8 @@ class MAPPOPolicy(object):
             actor_input["is_init"], (*actor_input.batch_size, self.agent_spec.n)
         )
         actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
-        actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1, randomness="different")(
-            actor_input, self.actor_params, deterministic=deterministic
+        actor_output = vmap(self.actor, in_dims=1, out_dims=1, randomness="different")(
+            actor_input, deterministic=deterministic
         )
 
         tensordict.update(actor_output)
@@ -228,12 +226,13 @@ class MAPPOPolicy(object):
 
         log_probs_old = batch[self.act_logps_name]
         if hasattr(self, "minibatch_seq_len"): # [N, T, A, *]
-            actor_output = vmap(self.actor, in_dims=(2, 0), out_dims=2)(
-                actor_input, self.actor_params, eval_action=True
-            )
+            pass
+            # actor_output = vmap(self.actor, in_dims=(2, 0), out_dims=2)(
+            #     actor_input, self.actor_params, eval_action=True
+            # )
         else: # [N, A, *]
-            actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1, randomness="different")(
-                actor_input, self.actor_params, eval_action=True
+            actor_output = vmap(self.actor, in_dims=0, out_dims=0, randomness="different")(
+                actor_input, eval_action=True
             )
 
         log_probs_new = actor_output[self.act_logps_name]
@@ -375,14 +374,13 @@ class MAPPOPolicy(object):
     def state_dict(self):
         state_dict = {
             "critic": self.critic.state_dict(),
-            "actor_params": self.actor_params,
+            "actor": self.actor.state_dict(),
             "value_normalizer": self.value_normalizer.state_dict()
         }
         return state_dict
     
     def load_state_dict(self, state_dict):
-        self.actor_params = state_dict["actor_params"]
-        # self.actor_params.copy_(state_dict["actor_params"])
+        self.actor.load_state_dict(state_dict["actor"])
         self.critic.load_state_dict(state_dict["critic"])
         self.value_normalizer.load_state_dict(state_dict["value_normalizer"])
 
