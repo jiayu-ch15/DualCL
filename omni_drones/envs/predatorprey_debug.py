@@ -406,6 +406,14 @@ class PredatorPrey_debug(IsaacEnv):
         self.info['capture_per_step'].set_(self.info['capture_episode'] / self.step_spec)
         catch_reward = 10 * capture_flag.sum(-1).unsqueeze(-1).expand_as(capture_flag)
 
+        # speed penalty
+        if self.cfg.use_speed_penalty:
+            drone_vel = self.drone.get_velocities()
+            drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
+            speed_reward = - 100 * (drone_speed_norm > self.cfg.v_drone)
+        else:
+            speed_reward = 0.0
+
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
         
@@ -425,9 +433,9 @@ class PredatorPrey_debug(IsaacEnv):
         distance_reward = - 1.0 * min_dist * dist_reward_mask
 
         if self.cfg.use_collision:
-            reward = 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
+            reward = speed_reward + 1.0 * catch_reward + 1.0 * distance_reward + 5 * coll_reward
         else:
-            reward = 1.0 * catch_reward + 1.0 * distance_reward
+            reward = speed_reward + 1.0 * catch_reward + 1.0 * distance_reward
         
         self._tensordict["return"] += reward.unsqueeze(-1)
         self.returns = self._tensordict["return"].sum(1)
