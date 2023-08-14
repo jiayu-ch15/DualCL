@@ -5,12 +5,12 @@ size_obstacle: 0.1
 v_drone: 0.5
 v_low: 1.3
 v_high: 1.3
-size: 0.5
-# model_dir: /root/OmniDrones/scripts/outputs/0obstacle_size05_speed1_3_newmodel/07-31_08-17/wandb/run-20230731_081740-sh7zzio5/files/checkpoint_3984850944.pt
-model_dir: null
+size: 1.0
+model_dir: /root/OmniDrones/scripts/outputs/0obstacle_size07_speed1_3_discrteaction_speedpenalty_catch015_thread2048_loadspeed1_3_size05/08-03_13-15/wandb/run-20230803_131526-8kwmo5uq/files/checkpoint_29176758272.pt
+# model_dir: null
 use_collision: 1
 use_speed_penalty: 1
-catch_radius: 0.1
+catch_radius: 0.15
 collision_radius: 0.01
 
 headless: true
@@ -30,13 +30,13 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  # run_name: 0obstacle_size05_speed1_3_discrteaction_speedpenalty
-  run_name: debug
+  run_name: 0obstacle_size1_speed1_3_discrteaction_speedpenalty_catch015_loadspeed1_3_size07
+  # run_name: debug
   job_type: train
   entity: chenjy
   project: issac_drones
-  # mode: online # set to 'disabled' when debugging locally
-  mode: disabled
+  mode: online # set to 'disabled' when debugging locally
+  # mode: disabled
   run_id: 
   monitor_gym: True
   tags: 
