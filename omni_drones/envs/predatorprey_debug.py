@@ -245,7 +245,7 @@ class PredatorPrey_debug(IsaacEnv):
                 "/World/envs/env_0/obstacle_{}".format(idx), 
                 prim_type="Capsule",
                 translation=obstacle_pos[idx],
-                attributes={"axis": "Z", "radius": self.size_obstacle, "height": 5}
+                attributes={"axis": "Z", "radius": self.size_obstacle, "height": self.size * 2}
             )
         
         objects.VisualCuboid(
