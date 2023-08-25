@@ -237,9 +237,11 @@ class PredatorPrey_debug(IsaacEnv):
 
         # init obstacle
         obstacle_pos = torch.zeros(self.num_obstacles, 3)
-        obstacle_pos[:, 0] = torch.arange(self.num_obstacles)
-        obstacle_pos[:, 1] = torch.arange(self.num_obstacles)
-        obstacle_pos[:, 2] = 0.5
+        random_pos_dist = D.Uniform(
+            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
+            torch.tensor([self.size, self.size, 0.0], device=self.device)
+        )
+        obstacle_pos = random_pos_dist.sample(obstacle_pos.shape[:-1])
         for idx in range(self.num_obstacles):
             create_obstacle(
                 "/World/envs/env_0/obstacle_{}".format(idx), 
