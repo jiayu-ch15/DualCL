@@ -103,14 +103,13 @@ class PredatorPrey_debug(IsaacEnv):
         )
         self.target.initialize()
         
-        if self.num_obstacles > 0:
-            self.obstacles = RigidPrimView(
-                "/World/envs/env_*/obstacle_*",
-                reset_xform_properties=False,
-                shape=[self.num_envs, -1],
-                # track_contact_forces=True
-            )
-            self.obstacles.initialize()
+        self.obstacles = RigidPrimView(
+            "/World/envs/env_*/obstacle_*",
+            reset_xform_properties=False,
+            shape=[self.num_envs, -1],
+            # track_contact_forces=True
+        )
+        self.obstacles.initialize()
         
         self.time_encoding = self.cfg.task.time_encoding
 
@@ -132,8 +131,6 @@ class PredatorPrey_debug(IsaacEnv):
 
         # CL
         # self.goals = self.create_goalproposal_mix()
-       
-        self.random_idx = torch.ones(self.num_envs, device=self.device)
         
         drone_state_dim = self.drone.state_spec.shape.numel()
         frame_state_dim = 9 # target_pos_dim + target_vel
@@ -200,6 +197,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.obstacle_size = self.cfg.obstacle_size
         self.size_min = self.cfg.size_min
         self.size_max = self.cfg.size_max
+        self.v_obstacle = self.cfg.v_obstacle
 
         # init drone
         drone_model = MultirotorBase.REGISTRY[self.cfg.task.drone_model]
@@ -238,11 +236,13 @@ class PredatorPrey_debug(IsaacEnv):
         )
         obstacle_pos = random_pos_dist.sample(obstacle_pos.shape[:-1])
         for idx in range(self.num_obstacles):
-            create_obstacle(
-                "/World/envs/env_0/obstacle_{}".format(idx), 
-                prim_type="Capsule",
+            objects.DynamicSphere(
+                prim_path="/World/envs/env_0/obstacle_{}".format(idx),
+                name="obstacle_{}".format(idx),
                 translation=obstacle_pos[idx],
-                attributes={"axis": "Z", "radius": self.obstacle_size, "height": size * 2}
+                radius=0.05,
+                color=torch.tensor([1., 1., 1.]),
+                mass=1.0
             )
         
         objects.VisualCuboid(
@@ -325,6 +325,10 @@ class PredatorPrey_debug(IsaacEnv):
             (obstacle_pos + self.envs_positions[env_ids].unsqueeze(1))[env_ids], env_indices=env_ids
         )
         
+        # obstacles begin to move
+        # self.obstacles_start_move = np.random.randint(0, self.max_episode_length // 2, size = (n_envs, self.num_obstacles))
+        self.obstacles_start_move = torch.zeros(size=(n_envs, self.num_obstacles)).to(self.device)
+        
         # reset velocity of prey
         self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
         
@@ -357,6 +361,18 @@ class PredatorPrey_debug(IsaacEnv):
         target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
         
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
+        
+        obstacles_vel = self.obstacles.get_velocities()
+        # whether begin to move
+        mask_vel = self.progress_buf.unsqueeze(1) >= self.obstacles_start_move
+        # T: move to the boundary
+        T = (2 * self.size_list / self.v_obstacle / dt).unsqueeze(1)
+        # move to the opposite direction when touch the boundary
+        # True = 1, False = -1
+        direction_vel = ((self.progress_buf.unsqueeze(1) - self.obstacles_start_move) // T % 2 == 0) * 2 - 1
+        obstacles_vel[:,:,2] = self.v_obstacle * mask_vel * direction_vel
+        pdb.set_trace()
+        self.obstacles.set_velocities(obstacles_vel.type(torch.float32), self.env_ids)
 
     def _compute_state_and_obs(self):
         self.drone_states = self.drone.get_state()
