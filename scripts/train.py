@@ -227,6 +227,37 @@ def main(cfg):
         frames.clear()
         return info
 
+    @torch.no_grad()
+    def evaluate_env():
+        frames = []
+
+        def record_frame(*args, **kwargs):
+            frame = env.base_env.render(mode="rgb_array")
+            frames.append(frame)
+
+        base_env.enable_render(True)
+        env.eval()
+        env.rollout(
+            max_steps=base_env.max_episode_length,
+            policy=policy,
+            callback=Every(record_frame, 2),
+            auto_reset=True,
+            break_when_any_done=False,
+            return_contiguous=False
+        )
+        base_env.enable_render(not cfg.headless)
+        env.reset()
+        env.train()
+
+        if len(frames):
+            # video_array = torch.stack(frames)
+            video_array = np.stack(frames).transpose(0, 3, 1, 2)
+            info["recording"] = wandb.Video(
+                video_array, fps=0.5 / cfg.sim.dt, format="mp4"
+            )
+        frames.clear()
+        return info
+
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
         info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
@@ -235,6 +266,7 @@ def main(cfg):
         if eval_interval > 0 and i % eval_interval == 0:
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
+            # info.update(evaluate_env())
 
         if save_interval > 0 and i % save_interval == 0:
             if hasattr(policy, "state_dict"):
@@ -256,6 +288,7 @@ def main(cfg):
     logging.info(f"Final Eval at {collector._frames} steps.")
     info = {"env_frames": collector._frames}
     info.update(evaluate())
+    # info.update(evaluate_env())
     run.log(info)
 
     if hasattr(policy, "state_dict"):

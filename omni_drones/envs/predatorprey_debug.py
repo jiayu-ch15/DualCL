@@ -27,6 +27,7 @@ import omni.isaac.core.utils.prims as prim_utils
 import omni.physx.scripts.utils as script_utils
 from omni_drones.utils.scene import design_scene
 from .utils import create_obstacle
+import pdb
 
 # drones on land by default
 # only cubes are available as walls
@@ -115,13 +116,19 @@ class PredatorPrey_debug(IsaacEnv):
 
         self.target_init_vel = self.target.get_velocities(clone=True)
         self.env_ids = torch.from_numpy(np.arange(0, cfg.env.num_envs))
-        self.radius = self.cfg.size
-        self.size = self.cfg.size
+        self.size_min = self.cfg.size_min
+        self.size_max = self.cfg.size_max
+        self.size_dist = D.Uniform(
+            torch.tensor([self.size_min], device=self.device),
+            torch.tensor([self.size_max], device=self.device)
+        )
         self.caught = self.progress_buf * 0
         self.returns = self.progress_buf * 0
         self.catch_radius = self.cfg.catch_radius
         self.collision_radius = self.cfg.collision_radius
         self.init_poses = self.drone.get_world_poses(clone=True)
+        self.v_low = self.cfg.v_drone * self.cfg.v_low
+        self.v_high = self.cfg.v_drone * self.cfg.v_high
 
         # CL
         # self.goals = self.create_goalproposal_mix()
@@ -170,21 +177,6 @@ class PredatorPrey_debug(IsaacEnv):
             "max_linvel": torch.ones(self.num_envs, 1, device=self.device)
         }, self.num_envs)
 
-        self.drone_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
-        )
-
-        self.target_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 2 * self.size], device=self.device)
-        )
-
-        self.obstacles_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 0.0], device=self.device)
-        )
-
         # infos
         info_spec = CompositeSpec({
             "capture": UnboundedContinuousTensorSpec(1),
@@ -205,11 +197,9 @@ class PredatorPrey_debug(IsaacEnv):
     def _design_scene(self):
         self.num_agents = self.cfg.num_agents
         self.num_obstacles = self.cfg.num_obstacles
-        self.size_obstacle = self.cfg.size_obstacle
-        self.v_low = self.cfg.v_drone * self.cfg.v_low
-        self.v_high = self.cfg.v_drone * self.cfg.v_high
-        self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
-        self.size = self.cfg.size
+        self.obstacle_size = self.cfg.obstacle_size
+        self.size_min = self.cfg.size_min
+        self.size_max = self.cfg.size_max
 
         # init drone
         drone_model = MultirotorBase.REGISTRY[self.cfg.task.drone_model]
@@ -237,9 +227,14 @@ class PredatorPrey_debug(IsaacEnv):
 
         # init obstacle
         obstacle_pos = torch.zeros(self.num_obstacles, 3)
+        size_dist = D.Uniform(
+            torch.tensor([self.size_min], device=self.device),
+            torch.tensor([self.size_max], device=self.device)
+        )
+        size = size_dist.sample().item()
         random_pos_dist = D.Uniform(
-            torch.tensor([-self.size, -self.size, 0.0], device=self.device),
-            torch.tensor([self.size, self.size, 0.0], device=self.device)
+            torch.tensor([-size, -size, 0.0], device=self.device),
+            torch.tensor([size, size, 0.0], device=self.device)
         )
         obstacle_pos = random_pos_dist.sample(obstacle_pos.shape[:-1])
         for idx in range(self.num_obstacles):
@@ -247,14 +242,14 @@ class PredatorPrey_debug(IsaacEnv):
                 "/World/envs/env_0/obstacle_{}".format(idx), 
                 prim_type="Capsule",
                 translation=obstacle_pos[idx],
-                attributes={"axis": "Z", "radius": self.size_obstacle, "height": self.size * 2}
+                attributes={"axis": "Z", "radius": self.obstacle_size, "height": size * 2}
             )
         
         objects.VisualCuboid(
             prim_path="/World/envs/env_0/ground",
             name="ground",
             translation= torch.tensor([0., 0., 0.], device=self.device),
-            scale=torch.tensor([self.size * 2, self.size * 2, 0.001], device=self.device),
+            scale=torch.tensor([size * 2, size * 2, 0.001], device=self.device),
             color=torch.tensor([0., 0., 0.]),
         )
     
@@ -277,31 +272,62 @@ class PredatorPrey_debug(IsaacEnv):
         init_pos, rot = self.init_poses
         self.drone._reset_idx(env_ids)
 
-        drone_pos = self.drone_pos_dist.sample(init_pos.shape[:-1])
+        n_envs = len(env_ids)
+        drone_pos = []
+        obstacle_pos = []
+        target_pos = []
+        self.size_list = []
+        # reset size
+        for idx in range(n_envs):
+            size = self.size_dist.sample().item()
+            
+            self.size_list.append(size)
+        
+            drone_pos_dist = D.Uniform(
+                torch.tensor([-size, -size, 0.0], device=self.device),
+                torch.tensor([size, size, 2 * size], device=self.device)
+            )
+            drone_pos.append(drone_pos_dist.sample((1,n)))
+
+            target_pos_dist = D.Uniform(
+                torch.tensor([-size, -size, 0.0], device=self.device),
+                torch.tensor([size, size, 2 * size], device=self.device)
+            )
+            target_pos.append(target_pos_dist.sample())
+
+            obstacles_pos_dist = D.Uniform(
+                torch.tensor([-size, -size, 0.0], device=self.device),
+                torch.tensor([size, size, 0.0], device=self.device)
+            )
+            obstacle_pos.append(obstacles_pos_dist.sample((1, self.num_obstacles)))
+
+        drone_pos = torch.concat(drone_pos, dim=0)
+        target_pos = torch.stack(target_pos, dim=0)
+        obstacle_pos = torch.concat(obstacle_pos, dim=0)
+        self.size_list = torch.Tensor(np.array(self.size_list)).to(self.device)
+        
+        # set position and velocity
         self.drone.set_world_poses(
             drone_pos + self.envs_positions[env_ids].unsqueeze(1), rot[env_ids], env_ids
         )
         drone_init_velocities = torch.zeros_like(self.drone.get_velocities())
         self.drone.set_velocities(torch.zeros_like(drone_init_velocities), env_ids)
-        
         self.drone_sum_speed = drone_init_velocities[...,0].squeeze(-1)
         self.drone_max_speed = drone_init_velocities[...,0].squeeze(-1)
 
-        # obstalces
-        if self.num_obstacles > 0:
-            obstacles_init_pos, _ = self.obstacles.get_world_poses()
-            obstacle_pos = self.obstacles_pos_dist.sample(obstacles_init_pos.shape[:-1])
-            self.obstacles.set_world_poses(
-                (obstacle_pos + self.envs_positions[env_ids].unsqueeze(1))[env_ids], env_indices=env_ids
-            )
-
-        target_init_pos, _ = self.target.get_world_poses()
-        target_pos = self.target_pos_dist.sample(target_init_pos.shape[:-1])
-        # self.target_pos[..., 2] = 0.5
+        # set target
         self.target.set_world_poses((self.envs_positions + target_pos)[env_ids], env_indices=env_ids)
         target_vel = self.target.get_velocities()
         self.target.set_velocities(2 * torch.rand_like(target_vel) - 1, self.env_ids)
 
+        # obstalces
+        self.obstacles.set_world_poses(
+            (obstacle_pos + self.envs_positions[env_ids].unsqueeze(1))[env_ids], env_indices=env_ids
+        )
+        
+        # reset velocity of prey
+        self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
+        
         # reset info
         info_spec = CompositeSpec({
             "capture": UnboundedContinuousTensorSpec(1),
@@ -376,16 +402,14 @@ class PredatorPrey_debug(IsaacEnv):
         obs["state_others"] = self.drone_rpos
         obs["state_frame"] = target_state.unsqueeze(1).expand(-1, self.drone.n, 1, -1)
         
-        if self.num_obstacles > 0:
-            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
-            # obstacle_rpos
-            obs["obstacles"] = vmap(cpos)(drone_pos, obstacle_pos)
+        obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
+        # obstacle_rpos
+        obs["obstacles"] = vmap(cpos)(drone_pos, obstacle_pos)
 
         state = TensorDict({}, [self.num_envs])
         state["state_drones"] = obs["state_self"].squeeze(2)    # [num_envs, drone.n, drone_state_dim]
         state["state_frame"] = target_state                # [num_envs, 1, target_rpos_dim]
-        if self.num_obstacles > 0:
-            state["obstacles"] = obstacle_pos            # [num_envs, num_obstacles, obstacles_dim]
+        state["obstacles"] = obstacle_pos            # [num_envs, num_obstacles, obstacles_dim]
         return TensorDict(
             {
                 "drone.obs": obs,
@@ -419,15 +443,12 @@ class PredatorPrey_debug(IsaacEnv):
         # collison with obstacles
         coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
         
-        if self.num_obstacles > 0:
-            obstacle_pos, _ = self.obstacles.get_world_poses()
-            for i in range(self.num_obstacles):
-                relative_pos = drone_pos[..., :2] - obstacle_pos[:, i, :2].unsqueeze(-2)
-                norm_r = torch.norm(relative_pos, dim=-1)
-                if_coll = (norm_r < (self.collision_radius + self.size_obstacle)).type(torch.float32)
-                # self.coll_times += if_coll
-                coll_reward -= if_coll # sparse
-                # self.collided = 1.0 * ((self.collided + if_coll) > 0)
+        obstacle_pos, _ = self.obstacles.get_world_poses()
+        for i in range(self.num_obstacles):
+            relative_pos = drone_pos[..., :2] - obstacle_pos[:, i, :2].unsqueeze(-2)
+            norm_r = torch.norm(relative_pos, dim=-1)
+            if_coll = (norm_r < (self.collision_radius + self.obstacle_size)).type(torch.float32)
+            coll_reward -= if_coll # sparse
 
         # distance reward
         min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
@@ -495,24 +516,18 @@ class PredatorPrey_debug(IsaacEnv):
         # 3D
         prey_env_pos, _ = self.get_env_poses(self.target.get_world_poses())
         force_r = torch.zeros_like(force)
-        force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size) + 1e-5) - 1 / (self.size - prey_env_pos[:,0] + 1e-5)
-        force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size) + 1e-5) - 1 / (self.size - prey_env_pos[:,1] + 1e-5)
-        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size - prey_env_pos[:,2] + 1e-5)
-        
-        # env_center = self.drone._envs_positions[..., :2]
-        # distance_center = torch.norm(env_center - prey_pos[..., :2])
-        # diretion_r = (env_center - prey_pos[..., :2]) / (distance_center + 1e-5)
-        # force_r = diretion_r * (1 / (self.radius - distance_center + 1e-5) - 1 / (self.radius + distance_center))
+        force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,0] + 1e-5)
+        force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,1] + 1e-5)
+        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size_list - prey_env_pos[:,2] + 1e-5)
         force += force_r
 
         # obstacles
-        if self.num_obstacles > 0:
-            obstacle_pos, _ = self.obstacles.get_world_poses()
-            dist_pos = torch.norm(prey_pos[..., :2] - obstacle_pos[..., :2],dim=-1).unsqueeze(-1).expand(-1, -1, 2)
-            direction_o = (prey_pos[..., :2] - obstacle_pos[..., :2]) / (dist_pos + 1e-5)
-            # orient = self.normalize(prey_pos - pos)
-            force_o = direction_o * (1 / (dist_pos + 1e-5))
-            force[..., :2] += torch.sum(force_o, dim=1)
+        obstacle_pos, _ = self.obstacles.get_world_poses()
+        dist_pos = torch.norm(prey_pos[..., :2] - obstacle_pos[..., :2],dim=-1).unsqueeze(-1).expand(-1, -1, 2)
+        direction_o = (prey_pos[..., :2] - obstacle_pos[..., :2]) / (dist_pos + 1e-5)
+        # orient = self.normalize(prey_pos - pos)
+        force_o = direction_o * (1 / (dist_pos + 1e-5))
+        force[..., :2] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
         return force.type(torch.float32)

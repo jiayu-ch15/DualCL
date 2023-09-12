@@ -125,10 +125,10 @@ class SplitEmbedding(nn.Module):
             raise NotImplementedError(embed_type)
 
         if layer_norm:
-            # self.layer_norm = nn.LayerNorm(embed_dim)
-            self.layer_norm = nn.LayerNorm(
-                (self.num_entities, embed_dim)
-            )  # somehow faster
+            self.layer_norm = nn.LayerNorm(embed_dim)
+            # self.layer_norm = nn.LayerNorm(
+            #     (self.num_entities, embed_dim)
+            # )  # somehow faster
 
     def forward(self, tensordict: TensorDict):
         embeddings = torch.cat(
