@@ -138,28 +138,17 @@ class PredatorPrey_debug(IsaacEnv):
             self.time_encoding_dim = 4
             frame_state_dim += self.time_encoding_dim        
 
-        if self.num_obstacles > 0:
-            observation_spec = CompositeSpec({
-                "state_self": UnboundedContinuousTensorSpec((1, 3 + 6 + drone_state_dim + self.drone.n)),
-                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)),
-                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
-                "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 3)),
-            }).to(self.device)
-            state_spec = CompositeSpec({
-                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + 6 + drone_state_dim + self.drone.n)),
-                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
-                "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 3)),
-            }).to(self.device)
-        else:
-            observation_spec = CompositeSpec({
-                "state_self": UnboundedContinuousTensorSpec((1, 3 + 6 + drone_state_dim + self.drone.n)),
-                "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)),
-                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
-            }).to(self.device)
-            state_spec = CompositeSpec({
-                "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + 6 + drone_state_dim + self.drone.n)),
-                "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
-            }).to(self.device)
+        observation_spec = CompositeSpec({
+            "state_self": UnboundedContinuousTensorSpec((1, 3 + 6 + drone_state_dim + self.drone.n)),
+            "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, 3)), # pos
+            "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+            "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 6)), # pos + vel
+        }).to(self.device)
+        state_spec = CompositeSpec({
+            "state_drones": UnboundedContinuousTensorSpec((self.drone.n, 3 + 6 + drone_state_dim + self.drone.n)),
+            "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+            "obstacles": UnboundedContinuousTensorSpec((self.num_obstacles, 6)),
+        }).to(self.device)
         
         self.agent_spec["drone"] = AgentSpec(
             "drone",
@@ -197,7 +186,8 @@ class PredatorPrey_debug(IsaacEnv):
         self.obstacle_size = self.cfg.obstacle_size
         self.size_min = self.cfg.size_min
         self.size_max = self.cfg.size_max
-        self.v_obstacle = self.cfg.v_obstacle
+        self.v_obstacle_min = self.cfg.v_obstacle_min
+        self.v_obstacle_max = self.cfg.v_obstacle_max
 
         # init drone
         drone_model = MultirotorBase.REGISTRY[self.cfg.task.drone_model]
@@ -326,11 +316,13 @@ class PredatorPrey_debug(IsaacEnv):
         )
         
         # obstacles begin to move
-        # self.obstacles_start_move = np.random.randint(0, self.max_episode_length // 2, size = (n_envs, self.num_obstacles))
-        self.obstacles_start_move = torch.zeros(size=(n_envs, self.num_obstacles)).to(self.device)
+        self.obstacles_start_move = torch.randint(0, self.max_episode_length // 2, size = (n_envs, self.num_obstacles)).to(self.device)
+        # self.obstacles_start_move = torch.zeros(size=(n_envs, self.num_obstacles)).to(self.device)
         
         # reset velocity of prey
         self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
+        # reset velocity of obstacles
+        self.v_obstacle = torch.from_numpy(np.random.uniform(self.v_obstacle_min, self.v_obstacle_max, [self.num_envs, 1])).to(self.device)
         
         # reset info
         info_spec = CompositeSpec({
@@ -366,12 +358,13 @@ class PredatorPrey_debug(IsaacEnv):
         # whether begin to move
         mask_vel = self.progress_buf.unsqueeze(1) >= self.obstacles_start_move
         # T: move to the boundary
-        T = (2 * self.size_list / self.v_obstacle / dt).unsqueeze(1)
+        T = (2 * self.size_list.unsqueeze(1) / self.v_obstacle / self.dt).type(torch.int)
         # move to the opposite direction when touch the boundary
         # True = 1, False = -1
         direction_vel = ((self.progress_buf.unsqueeze(1) - self.obstacles_start_move) // T % 2 == 0) * 2 - 1
         obstacles_vel[:,:,2] = self.v_obstacle * mask_vel * direction_vel
-        pdb.set_trace()
+        obstacles_vel[:,:,:2] = 0.0
+        obstacles_vel[:,:,3:] = 0.0
         self.obstacles.set_velocities(obstacles_vel.type(torch.float32), self.env_ids)
 
     def _compute_state_and_obs(self):
@@ -419,13 +412,14 @@ class PredatorPrey_debug(IsaacEnv):
         obs["state_frame"] = target_state.unsqueeze(1).expand(-1, self.drone.n, 1, -1)
         
         obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
-        # obstacle_rpos
-        obs["obstacles"] = vmap(cpos)(drone_pos, obstacle_pos)
+        obstacles_vel = self.obstacles.get_velocities()[...,:3]
+        # obstacle_rpos + vel
+        obs["obstacles"] = torch.concat([vmap(cpos)(drone_pos, obstacle_pos), obstacles_vel.unsqueeze(1).expand(-1, self.drone.n, -1, -1)], dim=-1)
 
         state = TensorDict({}, [self.num_envs])
         state["state_drones"] = obs["state_self"].squeeze(2)    # [num_envs, drone.n, drone_state_dim]
         state["state_frame"] = target_state                # [num_envs, 1, target_rpos_dim]
-        state["obstacles"] = obstacle_pos            # [num_envs, num_obstacles, obstacles_dim]
+        state["obstacles"] = torch.concat([obstacle_pos, obstacles_vel], dim=-1)            # [num_envs, num_obstacles, obstacles_dim]
         return TensorDict(
             {
                 "drone.obs": obs,
@@ -539,11 +533,10 @@ class PredatorPrey_debug(IsaacEnv):
 
         # obstacles
         obstacle_pos, _ = self.obstacles.get_world_poses()
-        dist_pos = torch.norm(prey_pos[..., :2] - obstacle_pos[..., :2],dim=-1).unsqueeze(-1).expand(-1, -1, 2)
-        direction_o = (prey_pos[..., :2] - obstacle_pos[..., :2]) / (dist_pos + 1e-5)
-        # orient = self.normalize(prey_pos - pos)
+        dist_pos = torch.norm(prey_pos[..., :3] - obstacle_pos[..., :3],dim=-1).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
+        direction_o = (prey_pos[..., :3] - obstacle_pos[..., :3]) / (dist_pos + 1e-5)
         force_o = direction_o * (1 / (dist_pos + 1e-5))
-        force[..., :2] += torch.sum(force_o, dim=1)
+        force[..., :3] += torch.sum(force_o, dim=1)
 
         # set force_z to 0
         return force.type(torch.float32)
