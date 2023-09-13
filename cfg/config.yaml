@@ -33,8 +33,8 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  # run_name: 2obstacle_size07_speed1_3to3
-  run_name: model_debug
+  run_name: 5obstacle_size05_speed1_3_obstaclespeed1
+  # run_name: model_debug
   job_type: train
   entity: chenjy
   project: issac_drones
