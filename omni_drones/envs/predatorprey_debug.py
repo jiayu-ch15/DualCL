@@ -358,7 +358,7 @@ class PredatorPrey_debug(IsaacEnv):
         # whether begin to move
         mask_vel = self.progress_buf.unsqueeze(1) >= self.obstacles_start_move
         # T: move to the boundary
-        T = (2 * self.size_list.unsqueeze(1) / self.v_obstacle / self.dt).type(torch.int)
+        T = (self.size_list.unsqueeze(1) / self.v_obstacle / self.dt).type(torch.int)
         # move to the opposite direction when touch the boundary
         # True = 1, False = -1
         direction_vel = ((self.progress_buf.unsqueeze(1) - self.obstacles_start_move) // T % 2 == 0) * 2 - 1
@@ -528,7 +528,7 @@ class PredatorPrey_debug(IsaacEnv):
         force_r = torch.zeros_like(force)
         force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,0] + 1e-5)
         force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,1] + 1e-5)
-        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size_list - prey_env_pos[:,2] + 1e-5)
+        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (self.size_list - prey_env_pos[:,2] + 1e-5)
         force += force_r
 
         # obstacles
