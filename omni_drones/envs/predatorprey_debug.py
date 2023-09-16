@@ -128,6 +128,8 @@ class PredatorPrey_debug(IsaacEnv):
         self.init_poses = self.drone.get_world_poses(clone=True)
         self.v_low = self.cfg.v_drone * self.cfg.v_low
         self.v_high = self.cfg.v_drone * self.cfg.v_high
+        self.v_obstacle_min = self.cfg.v_drone * self.cfg.v_obstacle_min
+        self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
 
         # CL
         # self.goals = self.create_goalproposal_mix()
@@ -186,8 +188,6 @@ class PredatorPrey_debug(IsaacEnv):
         self.obstacle_size = self.cfg.obstacle_size
         self.size_min = self.cfg.size_min
         self.size_max = self.cfg.size_max
-        self.v_obstacle_min = self.cfg.v_obstacle_min
-        self.v_obstacle_max = self.cfg.v_obstacle_max
 
         # init drone
         drone_model = MultirotorBase.REGISTRY[self.cfg.task.drone_model]
