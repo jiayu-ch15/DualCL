@@ -155,7 +155,7 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-    camera.spawn(["/World/Camera"], translations=[(7.5, 7.5, 7.5)], targets=[(0, 0, 0.5)])
+        camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 10.0)], targets=[(0.0, 0.0, 0.0)])
     camera.initialize("/World/Camera")
 
     # TODO: create a agent_spec view for TransformedEnv
@@ -171,13 +171,13 @@ def main(cfg):
         cfg.algo, agent_spec=agent_spec, device="cuda"
     )
 
-    ckpt_name = "checkpoint_final.pt"
-    ckpt = wandb.restore(ckpt_name, run.path)
-    state_dict = torch.load(ckpt)
-    policy.load_state_dict(state_dict)
+    # ckpt_name = "checkpoint_final.pt"
+    # ckpt = wandb.restore(ckpt_name, run.path)
+    # state_dict = torch.load(ckpt)
+    # policy.load_state_dict(state_dict)
 
     @torch.no_grad()
-    def evaluate(max_steps: int):
+    def evaluate(policy):
         frames = []
 
         def record_frame(*args, **kwargs):
@@ -187,7 +187,7 @@ def main(cfg):
         base_env.enable_render(True)
         env.eval()
         env.rollout(
-            max_steps=max_steps,
+            max_steps=base_env.max_episode_length,
             policy=policy,
             callback=Every(record_frame, 2),
             auto_reset=True,
@@ -206,8 +206,15 @@ def main(cfg):
         frames.clear()
         return info
 
-    info = evaluate()
-    print(info)
+    checkpoint_inter = 0
+    while checkpoint_inter < cfg.end_checkpoint:
+        end_model = cfg.model_dir + '/checkpoint_{}.pt'.format(checkpoint_inter)
+        policy.load_state_dict(torch.load(end_model))
+        print("Successfully load model!")
+
+        info = evaluate(policy)
+        print(info)
+        checkpoint_inter += cfg.save_interval
     
     simulation_app.close()
 

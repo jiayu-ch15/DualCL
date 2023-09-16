@@ -130,6 +130,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.v_high = self.cfg.v_drone * self.cfg.v_high
         self.v_obstacle_min = self.cfg.v_drone * self.cfg.v_obstacle_min
         self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
+        self.obstacle_control_fre = self.cfg.obstacle_control_fre
 
         # CL
         # self.goals = self.create_goalproposal_mix()
@@ -287,7 +288,7 @@ class PredatorPrey_debug(IsaacEnv):
 
             obstacles_pos_dist = D.Uniform(
                 torch.tensor([-size, -size, 0.0], device=self.device),
-                torch.tensor([size, size, 0.0], device=self.device)
+                torch.tensor([size, size, 2 * size], device=self.device)
             )
             obstacle_pos.append(obstacles_pos_dist.sample((1, self.num_obstacles)))
 
@@ -316,8 +317,7 @@ class PredatorPrey_debug(IsaacEnv):
         )
         
         # obstacles begin to move
-        self.obstacles_start_move = torch.randint(0, self.max_episode_length // 2, size = (n_envs, self.num_obstacles)).to(self.device)
-        # self.obstacles_start_move = torch.zeros(size=(n_envs, self.num_obstacles)).to(self.device)
+        # self.obstacles_start_move = torch.randint(0, self.max_episode_length // 2, size = (n_envs, self.num_obstacles)).to(self.device)
         
         # reset velocity of prey
         self.v_prey = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
@@ -354,18 +354,26 @@ class PredatorPrey_debug(IsaacEnv):
         
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
         
+        # set obstacles vel with fre = self.obstacle_control_fre
         obstacles_vel = self.obstacles.get_velocities()
-        # whether begin to move
-        mask_vel = self.progress_buf.unsqueeze(1) >= self.obstacles_start_move
-        # T: move to the boundary
-        T = (self.size_list.unsqueeze(1) / self.v_obstacle / self.dt).type(torch.int)
-        # move to the opposite direction when touch the boundary
-        # True = 1, False = -1
-        direction_vel = ((self.progress_buf.unsqueeze(1) - self.obstacles_start_move) // T % 2 == 0) * 2 - 1
-        obstacles_vel[:,:,2] = self.v_obstacle * mask_vel * direction_vel
-        obstacles_vel[:,:,:2] = 0.0
-        obstacles_vel[:,:,3:] = 0.0
+        
+        new_obstacle_flag = (self.progress_buf % self.obstacle_control_fre == 0).unsqueeze(1).expand(-1, self.num_obstacles).unsqueeze(-1)
+        new_obstacles_vel = obstacles_vel.clone()
+        direction_vel = 2 * torch.rand(self.num_envs, self.num_obstacles, 3) - 1
+        direction_vel = (direction_vel / torch.norm(direction_vel)).to(self.device)
+        new_obstacles_vel[:,:,:3] = torch.mul(self.v_obstacle.unsqueeze(1).expand(-1, self.num_obstacles, -1), direction_vel)
+        
+        obstacles_vel = new_obstacles_vel * new_obstacle_flag + obstacles_vel * ~(new_obstacle_flag)
         self.obstacles.set_velocities(obstacles_vel.type(torch.float32), self.env_ids)
+        
+        # clip, if out of area
+        obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
+        min_values = torch.stack([-self.size_list, -self.size_list, torch.zeros_like(self.size_list)], dim=-1).unsqueeze(1).expand(-1, self.num_obstacles, -1)  # min for each dim, shape=(envs, num_obstacles, 3)
+        max_values = torch.stack([self.size_list, self.size_list, 2 * self.size_list], dim=-1).unsqueeze(1).expand(-1, self.num_obstacles, -1)  # max for each dim
+        obstacle_pos = torch.clamp(obstacle_pos, min_values, max_values)
+        self.obstacles.set_world_poses(
+            (obstacle_pos + self.envs_positions[self.env_ids].unsqueeze(1))[self.env_ids], env_indices=self.env_ids
+        )
 
     def _compute_state_and_obs(self):
         self.drone_states = self.drone.get_state()
@@ -528,7 +536,7 @@ class PredatorPrey_debug(IsaacEnv):
         force_r = torch.zeros_like(force)
         force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,0] + 1e-5)
         force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,1] + 1e-5)
-        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (self.size_list - prey_env_pos[:,2] + 1e-5)
+        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size_list - prey_env_pos[:,2] + 1e-5)
         force += force_r
 
         # obstacles
