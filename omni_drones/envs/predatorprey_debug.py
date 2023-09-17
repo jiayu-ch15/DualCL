@@ -356,11 +356,11 @@ class PredatorPrey_debug(IsaacEnv):
         
         # set obstacles vel with fre = self.obstacle_control_fre
         obstacles_vel = self.obstacles.get_velocities()
-        
+    
         new_obstacle_flag = (self.progress_buf % self.obstacle_control_fre == 0).unsqueeze(1).expand(-1, self.num_obstacles).unsqueeze(-1)
         new_obstacles_vel = obstacles_vel.clone()
         direction_vel = 2 * torch.rand(self.num_envs, self.num_obstacles, 3) - 1
-        direction_vel = (direction_vel / torch.norm(direction_vel)).to(self.device)
+        direction_vel = (direction_vel / torch.norm(direction_vel, dim=-1).unsqueeze(-1)).to(self.device)
         new_obstacles_vel[:,:,:3] = torch.mul(self.v_obstacle.unsqueeze(1).expand(-1, self.num_obstacles, -1), direction_vel)
         
         obstacles_vel = new_obstacles_vel * new_obstacle_flag + obstacles_vel * ~(new_obstacle_flag)
