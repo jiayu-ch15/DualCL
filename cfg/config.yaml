@@ -5,8 +5,8 @@ obstacle_size: 0.05
 v_drone: 1.0
 v_low: 1.3
 v_high: 1.3
-v_obstacle_min: 5.0
-v_obstacle_max: 5.0
+v_obstacle_min: 2.0
+v_obstacle_max: 2.0
 size_min: 1.0
 size_max: 1.0
 obstacle_control_fre: 20
@@ -34,8 +34,8 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: 5obstacle_size1_0_speed1_3_obstaclespeed0
-  # run_name: model_debug
+  # run_name: 5obstacle_size1_0_speed1_3_obstaclespeed0
+  run_name: model_debug
   job_type: train
   entity: chenjy
   project: issac_drones
