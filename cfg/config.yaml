@@ -4,10 +4,10 @@ num_obstacles: 5
 obstacle_size: 0.05
 v_drone: 1.0
 v_low: 1.3
-v_high: 1.3
-v_obstacle_min: 2.0
-v_obstacle_max: 2.0
-size_min: 1.0
+v_high: 3.0
+v_obstacle_min: 0.0
+v_obstacle_max: 1.0
+size_min: 0.5
 size_max: 1.0
 obstacle_control_fre: 20
 # model_dir: /root/OmniDrones/scripts/outputs/5obstacle_size1_speed1_3_obstaclespeed0/09-15_07-10/wandb/run-20230915_071043-toc9dkyu/files/checkpoint_2792226816.pt
@@ -34,8 +34,8 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  # run_name: 5obstacle_size1_0_speed1_3_obstaclespeed0
-  run_name: model_debug
+  run_name: 5obstacle_size0_5to1_speed1_3to3_obstaclespeed0to1
+  # run_name: model_debug
   job_type: train
   entity: chenjy
   project: issac_drones
