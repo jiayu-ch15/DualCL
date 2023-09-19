@@ -533,7 +533,7 @@ class PredatorPrey_debug(IsaacEnv):
             "drone_pos": drone_pos,
             "drone_vel": drone_vel,
             "target_pos": target_pos,
-            "obstacle_pos": obstacle_pos
+            "obstacle_pos": obstacle_pos,
         })
         return x
 
