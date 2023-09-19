@@ -511,6 +511,32 @@ class PredatorPrey_debug(IsaacEnv):
             # "cl_level": self.cl_level*torch.ones(self.num_envs, device=self.device),
             # "progress_std": self.progress_std**torch.ones(self.num_envs, device=self.device)
         }, self.batch_size)
+    
+
+    def _norm(self, x):
+        y = x / (torch.norm(x, dim=-1, keepdim=True)).expand_as(x)
+        return y
+    
+    @property
+    def info(self):
+        self.drone_states = self.drone.get_state()
+        drone_pos = self.drone_states[..., :3]
+        drone_vel = self.drone.get_velocities()
+        target_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        
+        if self.num_obstacles>0:
+            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
+        else:
+            obstacle_pos = None
+        
+        x = TensorDict({
+            "drone_pos": drone_pos,
+            "drone_vel": drone_vel,
+            "target_pos": target_pos,
+            "obstacle_pos": obstacle_pos
+        })
+        return x
+
 
     def _get_dummy_policy_prey(self):
         pos, _ = self.drone.get_world_poses(False)

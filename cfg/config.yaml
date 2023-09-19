@@ -39,7 +39,7 @@ wandb:
   job_type: train
   entity: chenjy
   project: issac_drones
-  mode: online # set to 'disabled' when debugging locally
+  mode: disabled # set to 'disabled' when debugging locally
   # mode: disabled
   run_id: 
   monitor_gym: True
