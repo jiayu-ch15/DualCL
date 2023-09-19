@@ -518,24 +518,61 @@ class PredatorPrey_debug(IsaacEnv):
         return y
     
     @property
-    def info(self):
+    def drone_pos(self):
         self.drone_states = self.drone.get_state()
         drone_pos = self.drone_states[..., :3]
-        drone_vel = self.drone.get_velocities()
-        target_pos, _ = self.get_env_poses(self.target.get_world_poses())
-        
+        return drone_pos
+    
+    @property
+    def drone_vel(self):
+        drone_vel = self.drone.get_velocities()[..., :3]
+        return drone_vel
+
+    @property
+    def prey_pos(self):
+        prey_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        return prey_pos
+    
+    @property
+    def prey_vel(self):
+        prey_vel = self.target.get_velocities()[..., :3]
+        return prey_vel
+    
+    @property
+    def obstacle_pos(self):
         if self.num_obstacles>0:
             obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
         else:
             obstacle_pos = None
+        return obstacle_pos
+    
+    # cross_diff
+    def cross_diff(self, x, y):
+        m = x.size()[-2]
+        n = y.size()[-2]
+        x2 = x.unsqueeze(-2).expand(-1,n,-1)
+        y2 = y.unsqueeze(-3).expand(m,-1,-1)
+        return x-y
+
+
+    def Janasov(self, func):
+        prey_pos = self.prey_pos.unsqueeze(1).exand(-1,self.num_agents,-1)
+        dist = prey_pos - self.drone_pos
+        prey_vel = self.prey_vel.unsqueeze(1).exand(-1,self.num_agents,-1)
+        relative_vel = prey_vel - self.drone_vel
         
-        x = TensorDict({
-            "drone_pos": drone_pos,
-            "drone_vel": drone_vel,
-            "target_pos": target_pos,
-            "obstacle_pos": obstacle_pos,
-        })
-        return x
+        if self.num_obstacles>0:
+            obs_pos = self.obstacle_pos
+            prey_to_obs = self.cross_diff(prey_pos, obs_pos)
+            pass
+
+        
+
+        
+        # interaction
+
+
+
 
 
     def _get_dummy_policy_prey(self):

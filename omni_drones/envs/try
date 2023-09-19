@@ -7,6 +7,17 @@ def _norm(x):
 
 a = torch.tensor([[1,2,3], [4,5,6]])*1.0
 print(_norm(a))
+
+x = torch.tensor([[1,2,3], [4,5,6]])*1.0
+y = torch.tensor([[1,2,3], [4,5,6], [7,8,9]])*1.0
+
+m = x.size()[-2]
+n = y.size()[-2]
+print(m,n)
+m2 = x.unsqueeze(1).expand(-1,n,-1)
+n2 = y.unsqueeze(0).expand(m,-1,-1)
+print(m2-n2)
+
 # b = tensordict({
 #     "w":
 #         {
