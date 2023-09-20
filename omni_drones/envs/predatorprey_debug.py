@@ -263,6 +263,7 @@ class PredatorPrey_debug(IsaacEnv):
         init_pos, rot = self.init_poses
         self.drone._reset_idx(env_ids)
 
+
         n_envs = len(env_ids)
         drone_pos = []
         obstacle_pos = []
