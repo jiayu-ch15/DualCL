@@ -552,7 +552,26 @@ class PredatorPrey_debug(IsaacEnv):
             obstacle_pos = None
         return obstacle_pos
     
-    # cross_diff
+    # def forward(
+    #     self,
+    #     root_state: torch.Tensor,
+    #     control_target: torch.Tensor,
+    #     controller_state: TensorDict,
+    # ):
+    #     pos, rot, vel, ang_vel = torch.split(root_state, [3, 4, 3, 3])
+    #     target_pos, target_vel, target_yaw = torch.split(control_target, [3, 3, 1])
+    
+    # 控制器
+    def _ctrl_target(self, policy, dt=0.016):
+    # 当前状态
+        target_vel = self.drone_vel + policy * dt
+        target_pos = self.drone_pos + policy * dt
+        # target_yaw = 
+        # yaw?
+        
+        
+        
+    
     def cross_diff(self, x, y):
         # 4096*n*3
         m = x.size()[-2]
