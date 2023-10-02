@@ -29,6 +29,8 @@ from omni_drones.utils.scene import design_scene
 from .utils import create_obstacle
 import pdb
 
+from omni_drones.controllers import LeePositionController
+
 # drones on land by default
 # only cubes are available as walls
 
@@ -131,6 +133,24 @@ class PredatorPrey_debug(IsaacEnv):
         self.v_obstacle_min = self.cfg.v_drone * self.cfg.v_obstacle_min
         self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
         self.obstacle_control_fre = self.cfg.obstacle_control_fre
+
+        # controller_cls = base_env.drone.DEFAULT_CONTROLLER
+        # print(f"Use controller {controller_cls}")
+        # controller = controller_cls(
+        #     base_env.dt, 
+        #     9.81, 
+        #     base_env.drone.params
+        # ).to(base_env.device)
+        # transform = VelController(vmap(vmap(controller)), ("action", "drone.action"))
+        # transforms.append(transform)
+        controller_cls = self.drone.DEFAULT_CONTROLLER
+        self.controller = controller_cls(
+            self.dt, 
+            9.81, 
+            self.drone.params
+        ).to(self.device)
+        # self.controller = 
+        # self.controller_state = 
 
         # CL
         # self.goals = self.create_goalproposal_mix()
@@ -344,7 +364,17 @@ class PredatorPrey_debug(IsaacEnv):
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
         self.step_spec += 1
-        actions = tensordict[("action", "drone.action")]
+        # actions = tensordict[("action", "drone.action")]
+
+        policy = self.Janasov() # rule-based
+        control_target = self._ctrl_target(policy, self.dt)
+
+        root_state = self.drone.get_state(env=False)[..., :13].squeeze(0)
+        cmds, _controller_state = vmap(self.controller)(root_state, control_target, self.controller_state)
+        self.controller_state = _controller_state
+        torch.nan_to_num_(cmds, 0.)
+        actions = cmds
+
         self.effort = self.drone.apply_action(actions)
         
         target_vel = self.target.get_velocities()
@@ -552,24 +582,14 @@ class PredatorPrey_debug(IsaacEnv):
             obstacle_pos = None
         return obstacle_pos
     
-    # def forward(
-    #     self,
-    #     root_state: torch.Tensor,
-    #     control_target: torch.Tensor,
-    #     controller_state: TensorDict,
-    # ):
-    #     pos, rot, vel, ang_vel = torch.split(root_state, [3, 4, 3, 3])
-    #     target_pos, target_vel, target_yaw = torch.split(control_target, [3, 3, 1])
     
     # 控制器
     def _ctrl_target(self, policy, dt=0.016):
     # 当前状态
-        target_vel = self.drone_vel + policy * dt
         target_pos = self.drone_pos + policy * dt
-        # target_yaw = 
-        # yaw?
-        
-        
+        target_vel = self.drone_vel + policy * dt
+        target_yaw = self.drone.get_state()[..., 13] # unchanged
+        return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
         
     
     def cross_diff(self, x, y):

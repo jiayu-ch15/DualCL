@@ -59,6 +59,9 @@ class Every:
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
+
+    train = 0
+
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
@@ -262,7 +265,8 @@ def main(cfg):
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
         info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
-        info.update(policy.train_op(data))
+        if train:
+            info.update(policy.train_op(data))
 
         if eval_interval > 0 and i % eval_interval == 0:
             logging.info(f"Eval at {collector._frames} steps.")

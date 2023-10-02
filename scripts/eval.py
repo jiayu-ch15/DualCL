@@ -57,7 +57,7 @@ class Every:
             self.func(*args, **kwargs)
         self.i += 1
 
-@hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
+@hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -155,7 +155,7 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-        camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 10.0)], targets=[(0.0, 0.0, 0.0)])
+    camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 10.0)], targets=[(0.0, 0.0, 0.0)])
     camera.initialize("/World/Camera")
 
     # TODO: create a agent_spec view for TransformedEnv
@@ -207,14 +207,14 @@ def main(cfg):
         return info
 
     checkpoint_inter = 0
-    while checkpoint_inter < cfg.end_checkpoint:
-        end_model = cfg.model_dir + '/checkpoint_{}.pt'.format(checkpoint_inter)
-        policy.load_state_dict(torch.load(end_model))
-        print("Successfully load model!")
+    while checkpoint_inter < 100:
+        # end_model = cfg.model_dir + '/checkpoint_{}.pt'.format(checkpoint_inter)
+        # policy.load_state_dict(torch.load(end_model))
+        # print("Successfully load model!")
 
         info = evaluate(policy)
         print(info)
-        checkpoint_inter += cfg.save_interval
+        checkpoint_inter += 1
     
     simulation_app.close()
 
