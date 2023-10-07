@@ -149,8 +149,13 @@ class PredatorPrey_debug(IsaacEnv):
             9.81, 
             self.drone.params
         ).to(self.device)
+        
         # self.controller = 
         # self.controller_state = 
+        
+        
+        self.miu_list = torch.tensor([0., 1.], device=self.device)
+        self.lamb_list = torch.tensor([0.1, 0.3, 0.5, 0.7, 1.0, 1.5], device=self.device)
 
         # CL
         # self.goals = self.create_goalproposal_mix()
@@ -364,9 +369,17 @@ class PredatorPrey_debug(IsaacEnv):
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
         self.step_spec += 1
-        # actions = tensordict[("action", "drone.action")]
+        actions = tensordict[("action", "drone.action")]
+        
+        # APF_RL
+        # actions_APF = self.APF_convert(actions)
+        # policy = self.APF(miu=actions_APF[..., 0].unsqueeze(-1).expand(-1,-1,3),
+        #                   lamb=actions_APF[..., 1].unsqueeze(-1).expand(-1,-1,3),)
 
-        policy = self.Janasov() # rule-based
+        # rule-based
+        policy = self.Janasov()
+        
+        
         control_target = self._ctrl_target(policy, self.dt)
 
         root_state = self.drone.get_state(env=False)[..., :13].squeeze(0)
@@ -548,11 +561,26 @@ class PredatorPrey_debug(IsaacEnv):
         y = x / ((torch.norm(x, dim=-1, keepdim=True)).expand_as(x) + 1e-5)
         return y
     
+    
     def _pforce(self, x):
         # 一次反比斥力
         y = self._norm(x) / (torch.norm(x, dim=-1, keepdim=True).expand_as(x) + 1e-5)
         return y
     
+    def mapping(self, x, idx):
+        # return x[index]
+        flat_idx = idx.view(-1).long()
+        y = torch.index_select(x, dim=0, index=flat_idx).view(idx.shape)
+        return y 
+    
+    def APF_convert(self, x):
+        _max = torch.argmax(x, dim=-1, keepdim=True)
+        miu = self.mapping(self.miu_list, _max//6)
+        lamb = self.mapping(self.lamb_list, _max%6)
+        action = torch.concat([miu, lamb], dim=-1)
+        return action
+    
+        
     @property
     def drone_pos(self):
         self.drone_states = self.drone.get_state()
@@ -653,6 +681,8 @@ class PredatorPrey_debug(IsaacEnv):
         drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-5
         dist_drone = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone)
         force += torch.sum((0.5 - miu / dist_drone) * self._norm(drone_to_drone), dim=-2) # 拆开了
+        
+        return force
 
 
     def _get_dummy_policy_prey(self):
