@@ -350,6 +350,10 @@ class PredatorPrey_debug(IsaacEnv):
         # reset velocity of obstacles
         self.v_obstacle = torch.from_numpy(np.random.uniform(self.v_obstacle_min, self.v_obstacle_max, [self.num_envs, 1])).to(self.device)
         
+        print("result: ")
+        print("capture_per_step: ", self.info["capture_per_step"].mean())
+        print("capture_", self.info["capture"].mean())
+        
         # reset info
         info_spec = CompositeSpec({
             "capture": UnboundedContinuousTensorSpec(1),
@@ -491,7 +495,8 @@ class PredatorPrey_debug(IsaacEnv):
 
         capture_flag = (target_dist < self.catch_radius)
         self.info['capture_episode'].add_(torch.sum(capture_flag, dim=1).unsqueeze(-1))
-        self.info['capture'].set_(torch.from_numpy(self.info['capture_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
+        self.info['capture'].set_((self.info['capture_episode'] > 0).type(torch.float32))
+        # self.info['capture'].set_(torch.from_numpy(self.info['capture_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
         self.info['capture_per_step'].set_(self.info['capture_episode'] / self.step_spec)
         catch_reward = 10 * capture_flag.sum(-1).unsqueeze(-1).expand_as(capture_flag)
 

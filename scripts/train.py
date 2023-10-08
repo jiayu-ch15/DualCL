@@ -148,7 +148,7 @@ def main(cfg):
             raise NotImplementedError(f"Unknown action transform: {action_transform}")
     
     env = TransformedEnv(base_env, Compose(*transforms)).train()
-    env.set_seed(cfg.seed)
+    # env.set_seed(cfg.seed)
 
     camera_cfg = PinholeCameraCfg(
         sensor_tick=0,

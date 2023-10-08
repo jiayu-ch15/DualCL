@@ -45,6 +45,18 @@ from torchrl.envs.transforms import (
 )
 
 from tqdm import tqdm
+from PIL import Image
+import numpy as np
+
+def save_video(x):
+    # turn over
+    x = x.transpose(0, 2, 3, 1)
+    x = x[..., :3]
+    frames = []
+    for i in range(0, int(x.shape[0]), 5):
+        image = Image.fromarray(x[i].astype('uint8'), mode="RGB")
+        frames.append(image)
+    frames[0].save('animation.gif', save_all=True, append_images=frames[1:], duration=80, loop=0)
 
 class Every:
     def __init__(self, func, steps):
@@ -61,6 +73,8 @@ class Every:
 def main(cfg):
 
     train = 0
+    cfg.headless = 1
+    video = 0
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -148,7 +162,7 @@ def main(cfg):
             raise NotImplementedError(f"Unknown action transform: {action_transform}")
     
     env = TransformedEnv(base_env, Compose(*transforms)).train()
-    env.set_seed(cfg.seed)
+    # env.set_seed(cfg.seed)
 
     camera_cfg = PinholeCameraCfg(
         sensor_tick=0,
@@ -225,9 +239,11 @@ def main(cfg):
 
         if len(frames):
             video_array = torch.stack(frames)
+            save_video(video_array.numpy())
             info["recording"] = wandb.Video(
                 video_array, fps=0.5 / cfg.sim.dt, format="mp4"
             )
+        wandb.save()
         frames.clear()
         return info
 
@@ -264,11 +280,12 @@ def main(cfg):
 
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
+        # +512 frames
         info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
         if train:
             info.update(policy.train_op(data))
 
-        if eval_interval > 0 and i % eval_interval == 0:
+        if video and eval_interval > 0 and i % eval_interval == 0:
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
             # info.update(evaluate_env())
