@@ -34,13 +34,13 @@ viewer:
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: 5obstacle_size0_5to1_speed1_3to3_obstaclespeed0to1
+  run_name: APF_RL
   # run_name: model_debug
   job_type: train
-  entity: chenjy
+  entity: linster
   project: issac_drones
-  mode: disabled # set to 'disabled' when debugging locally
-  # mode: disabled
+  # mode: online # set to 'disabled' when debugging locally
+  mode: disabled
   run_id: 
   monitor_gym: True
   tags: 

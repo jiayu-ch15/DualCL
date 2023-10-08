@@ -151,7 +151,7 @@ class PredatorPrey_debug(IsaacEnv):
         ).to(self.device)
         
         # self.controller = 
-        # self.controller_state = 
+        self.controller_state = TensorDict({}, [self.num_envs, self.num_agents], device=self.device)
         
         
         self.miu_list = torch.tensor([0., 1.], device=self.device)
@@ -374,16 +374,17 @@ class PredatorPrey_debug(IsaacEnv):
         # APF_RL
         # actions_APF = self.APF_convert(actions)
         # policy = self.APF(miu=actions_APF[..., 0].unsqueeze(-1).expand(-1,-1,3),
-        #                   lamb=actions_APF[..., 1].unsqueeze(-1).expand(-1,-1,3),)
+        #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
         policy = self.Janasov()
-        
+        # policy = self.Ange()
+        # policy = self.APF()
         
         control_target = self._ctrl_target(policy, self.dt)
 
         root_state = self.drone.get_state(env=False)[..., :13].squeeze(0)
-        cmds, _controller_state = vmap(self.controller)(root_state, control_target, self.controller_state)
+        cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
         self.controller_state = _controller_state
         torch.nan_to_num_(cmds, 0.)
         actions = cmds
@@ -616,7 +617,7 @@ class PredatorPrey_debug(IsaacEnv):
     # 当前状态
         target_pos = self.drone_pos + policy * dt
         target_vel = self.drone_vel + policy * dt
-        target_yaw = self.drone.get_state()[..., 13] # unchanged
+        target_yaw = self.drone.get_state()[..., 13].unsqueeze(-1) # unchanged
         return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
         
     
@@ -624,9 +625,9 @@ class PredatorPrey_debug(IsaacEnv):
         # 4096*n*3
         m = x.size()[-2]
         n = y.size()[-2]
-        x2 = x.unsqueeze(-2).expand(-1,n,-1)
-        y2 = y.unsqueeze(-3).expand(m,-1,-1)
-        return x-y
+        x2 = x.unsqueeze(-2).expand(-1,-1,n,-1)
+        y2 = y.unsqueeze(-3).expand(-1,m,-1,-1)
+        return x2-y2
     
     def obs_repel(self):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
@@ -638,7 +639,7 @@ class PredatorPrey_debug(IsaacEnv):
     def Janasov(self, C_inter=0.5, r_inter=0.3):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
-        prey_pos = self.prey_pos.unsqueeze(1).exand(-1,self.num_agents,-1)
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         chase_force = prey_pos - self.drone_pos
         
         drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-5
@@ -651,7 +652,7 @@ class PredatorPrey_debug(IsaacEnv):
         R_vel = torch.mean(self.drone_vel, dim=-2, keepdim=True).expand_as(self.drone_vel)
         
         # chase
-        prey_pos = self.prey_pos.unsqueeze(1).exand(-1,self.num_agents,-1)
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         chase_force = prey_pos - self.drone_pos
         
         # repulse
@@ -668,7 +669,7 @@ class PredatorPrey_debug(IsaacEnv):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
         # chase
-        prey_pos = self.prey_pos.unsqueeze(1).exand(-1,self.num_agents,-1)
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         force += self._norm(prey_pos - self.drone_pos)
         
         # miu: obstacle        
@@ -680,7 +681,7 @@ class PredatorPrey_debug(IsaacEnv):
         # lamb: interaction
         drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-5
         dist_drone = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone)
-        force += torch.sum((0.5 - miu / dist_drone) * self._norm(drone_to_drone), dim=-2) # 拆开了
+        force += torch.sum((0.5 - lamb / dist_drone) * self._norm(drone_to_drone), dim=-2) # 拆开了
         
         return force
 

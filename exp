@@ -1,0 +1,6 @@
+import torch
+from tensordict.tensordict import TensorDict
+
+
+a = TensorDict({}, 3)
+print(a)
