@@ -53,10 +53,10 @@ def save_video(x):
     x = x.transpose(0, 2, 3, 1)
     x = x[..., :3]
     frames = []
-    for i in range(0, int(x.shape[0]), 5):
+    for i in range(0, x.shape[0], 7):
         image = Image.fromarray(x[i].astype('uint8'), mode="RGB")
         frames.append(image)
-    frames[0].save('animation.gif', save_all=True, append_images=frames[1:], duration=80, loop=0)
+    frames[0].save('animation.gif', save_all=True, append_images=frames[1:], duration=16*7, loop=0)
 
 class Every:
     def __init__(self, func, steps):
@@ -74,7 +74,7 @@ def main(cfg):
 
     train = 0
     cfg.headless = 1
-    video = 0
+    video = 1
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -286,8 +286,11 @@ def main(cfg):
             info.update(policy.train_op(data))
 
         if video and eval_interval > 0 and i % eval_interval == 0:
+            print("recording...")
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
+            print("saved as .gif")
+            continue
             # info.update(evaluate_env())
 
         if save_interval > 0 and i % save_interval == 0:
