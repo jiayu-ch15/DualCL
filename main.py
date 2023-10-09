@@ -5,6 +5,7 @@ import time
 import hydra
 from tensordict.tensordict import TensorDictBase
 import torch
+import torchvision
 from torchrl.data.tensor_specs import TensorSpec
 import wandb
 from functorch import vmap
@@ -48,15 +49,6 @@ from tqdm import tqdm
 from PIL import Image
 import numpy as np
 
-def save_video(x):
-    # turn over
-    x = x.transpose(0, 2, 3, 1)
-    x = x[..., :3]
-    frames = []
-    for i in range(0, x.shape[0], 7):
-        image = Image.fromarray(x[i].astype('uint8'), mode="RGB")
-        frames.append(image)
-    frames[0].save('animation.gif', save_all=True, append_images=frames[1:], duration=16*7, loop=0)
 
 class Every:
     def __init__(self, func, steps):
@@ -75,6 +67,7 @@ def main(cfg):
     train = 0
     cfg.headless = 1
     video = 1
+       
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -239,7 +232,9 @@ def main(cfg):
 
         if len(frames):
             video_array = torch.stack(frames)
-            save_video(video_array.numpy())
+            video_array = video_array.permute([0,2,3,1])[..., :3]
+            torchvision.io.write_video('animation.mp4', video_array=video_array, fps=63)
+            
             info["recording"] = wandb.Video(
                 video_array, fps=0.5 / cfg.sim.dt, format="mp4"
             )
@@ -247,36 +242,36 @@ def main(cfg):
         frames.clear()
         return info
 
-    @torch.no_grad()
-    def evaluate_env():
-        frames = []
+    # @torch.no_grad()
+    # def evaluate_env():
+    #     frames = []
 
-        def record_frame(*args, **kwargs):
-            frame = env.base_env.render(mode="rgb_array")
-            frames.append(frame)
+    #     def record_frame(*args, **kwargs):
+    #         frame = env.base_env.render(mode="rgb_array")
+    #         frames.append(frame)
 
-        base_env.enable_render(True)
-        env.eval()
-        env.rollout(
-            max_steps=base_env.max_episode_length,
-            policy=policy,
-            callback=Every(record_frame, 2),
-            auto_reset=True,
-            break_when_any_done=False,
-            return_contiguous=False
-        )
-        base_env.enable_render(not cfg.headless)
-        env.reset()
-        env.train()
+    #     base_env.enable_render(True)
+    #     env.eval()
+    #     env.rollout(
+    #         max_steps=base_env.max_episode_length,
+    #         policy=policy,
+    #         callback=Every(record_frame, 2),
+    #         auto_reset=True,
+    #         break_when_any_done=False,
+    #         return_contiguous=False
+    #     )
+    #     base_env.enable_render(not cfg.headless)
+    #     env.reset()
+    #     env.train()
 
-        if len(frames):
-            # video_array = torch.stack(frames)
-            video_array = np.stack(frames).transpose(0, 3, 1, 2)
-            info["recording"] = wandb.Video(
-                video_array, fps=0.5 / cfg.sim.dt, format="mp4"
-            )
-        frames.clear()
-        return info
+    #     if len(frames):
+    #         # video_array = torch.stack(frames)
+    #         video_array = np.stack(frames).transpose(0, 3, 1, 2)
+    #         info["recording"] = wandb.Video(
+    #             video_array, fps=0.5 / cfg.sim.dt, format="mp4"
+    #         )
+    #     frames.clear()
+    #     return info
 
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
@@ -289,7 +284,7 @@ def main(cfg):
             print("recording...")
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
-            print("saved as .gif")
+            print("saved")
             continue
             # info.update(evaluate_env())
 
