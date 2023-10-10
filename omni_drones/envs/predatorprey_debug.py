@@ -138,17 +138,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
         self.obstacle_control_fre = self.cfg.obstacle_control_fre
 
-        # controller_cls = base_env.drone.DEFAULT_CONTROLLER
-        # print(f"Use controller {controller_cls}")
-        # controller = controller_cls(
-        #     base_env.dt, 
-        #     9.81, 
-        #     base_env.drone.params
-        # ).to(base_env.device)
-        # transform = VelController(vmap(vmap(controller)), ("action", "drone.action"))
-        # transforms.append(transform)
         controller_cls = self.drone.DEFAULT_CONTROLLER
-        # controller_cls = LeePositionController
         self.controller = controller_cls(
             self.dt, 
             9.81, 
@@ -630,16 +620,13 @@ class PredatorPrey_debug(IsaacEnv):
         return obstacle_pos
     
     
-    # 控制器
+    # controller
     def _ctrl_target(self, policy, dt=0.016):
-        # vel=0: 可以悬停
-        
-    # 当前状态
-        target_pos = self.drone_pos + self._norm(policy) * dt * 0
-        target_vel = self.drone_vel + self._norm(policy) * dt
+
+        target_pos = self.drone_pos + policy * dt * 0
+        target_vel = self.drone_vel + policy * dt
         target_yaw = quaternion_to_euler(self.drone_rot)[..., 2].unsqueeze(-1) # unchanged
         
-        # target_yaw = self.drone.get_state()[..., 13].unsqueeze(-1) # unchanged
         return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
         
     
