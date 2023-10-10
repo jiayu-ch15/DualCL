@@ -403,9 +403,9 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
+        # policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
         # policy = self.Ange(rf=0.3, sigma=0.5, beta=1.0, yita=3.0)
-        # policy = self.APF()
+        policy = self.APF()
         
         control_target = self._ctrl_target(policy, self.dt)
 

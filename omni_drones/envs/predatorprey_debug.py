@@ -271,7 +271,7 @@ class PredatorPrey_debug(IsaacEnv):
             prim_path="/World/envs/env_0/ground",
             name="ground",
             translation= torch.tensor([0., 0., 0.], device=self.device),
-            scale=torch.tensor([size * 2, size * 2, 0.001], device=self.device),
+            scale=torch.tensor([self.size_max * 2, self.size_max * 2, 0.001], device=self.device),
             color=torch.tensor([0., 0., 0.]),
         )
     
@@ -388,8 +388,8 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        # policy = self.Janasov()
-        policy = self.Ange(beta=0.2)
+        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
+        # policy = self.Ange(rf=0.3, sigma=0.5, beta=1.0, yita=3.0)
         # policy = self.APF()
         
         control_target = self._ctrl_target(policy, self.dt)
@@ -400,7 +400,7 @@ class PredatorPrey_debug(IsaacEnv):
         torch.nan_to_num_(cmds, 0.)
         actions = cmds
 
-        # self.effort = self.drone.apply_action(actions)
+        self.effort = self.drone.apply_action(actions)
         
         
         target_vel = self.target.get_velocities()
