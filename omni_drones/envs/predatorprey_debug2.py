@@ -1,3 +1,5 @@
+# for balls instead of drones
+
 import torch
 import numpy as np
 import functorch
@@ -115,7 +117,13 @@ class PredatorPrey_debug(IsaacEnv):
         )
         self.obstacles.initialize()
         
-
+        self.balls = RigidPrimView(
+            "/World/envs/env_*/ball_*",
+            reset_xform_properties=False,
+            shape=[self.num_envs, -1],
+            # track_contact_forces=True
+        )
+        self.balls.initialize()
         
         self.time_encoding = self.cfg.task.time_encoding
 
@@ -138,17 +146,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
         self.obstacle_control_fre = self.cfg.obstacle_control_fre
 
-        # controller_cls = base_env.drone.DEFAULT_CONTROLLER
-        # print(f"Use controller {controller_cls}")
-        # controller = controller_cls(
-        #     base_env.dt, 
-        #     9.81, 
-        #     base_env.drone.params
-        # ).to(base_env.device)
-        # transform = VelController(vmap(vmap(controller)), ("action", "drone.action"))
-        # transforms.append(transform)
         controller_cls = self.drone.DEFAULT_CONTROLLER
-        # controller_cls = LeePositionController
         self.controller = controller_cls(
             self.dt, 
             9.81, 
@@ -244,6 +242,18 @@ class PredatorPrey_debug(IsaacEnv):
             mass=1.0
         )
         
+        # init fake drones as balls
+        ball_pos = torch.zeros(self.num_agents, 3)
+        for idx in range(self.num_agents):
+            objects.DynamicSphere(
+                prim_path="/World/envs/env_0/ball_{}".format(idx),
+                name="ball_{}".format(idx),
+                translation=ball_pos[idx],
+                radius=0.05,
+                color=torch.tensor([1., 0., 1.]),
+                mass=1.0
+            )
+        
 
         # init obstacle
         obstacle_pos = torch.zeros(self.num_obstacles, 3)
@@ -271,7 +281,7 @@ class PredatorPrey_debug(IsaacEnv):
             prim_path="/World/envs/env_0/ground",
             name="ground",
             translation= torch.tensor([0., 0., 0.], device=self.device),
-            scale=torch.tensor([size * 2, size * 2, 0.001], device=self.device),
+            scale=torch.tensor([self.size_max * 2, self.size_max * 2, 0.001], device=self.device),
             color=torch.tensor([0., 0., 0.]),
         )
     
@@ -338,6 +348,11 @@ class PredatorPrey_debug(IsaacEnv):
         self.drone_sum_speed = drone_init_velocities[...,0].squeeze(-1)
         self.drone_max_speed = drone_init_velocities[...,0].squeeze(-1)
         
+        # set balls
+        self.balls.set_world_poses(drone_pos + self.envs_positions[env_ids].unsqueeze(1), rot[env_ids], env_ids)
+        ball_init_velocities = torch.zeros_like(self.balls.get_velocities())
+        self.balls.set_velocities(torch.zeros_like(ball_init_velocities), env_ids)
+        
 
         # set target
         self.target.set_world_poses((self.envs_positions + target_pos)[env_ids], env_indices=env_ids)
@@ -388,8 +403,8 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        # policy = self.Janasov()
-        policy = self.Ange(beta=0.2)
+        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
+        # policy = self.Ange(rf=0.3, sigma=0.5, beta=1.0, yita=3.0)
         # policy = self.APF()
         
         control_target = self._ctrl_target(policy, self.dt)
@@ -402,12 +417,18 @@ class PredatorPrey_debug(IsaacEnv):
 
         # self.effort = self.drone.apply_action(actions)
         
+        # set balls
+        ball_vel = self.balls.get_velocities()
+        ball_vel[..., :3] = self._norm(policy).type(torch.float32)
+        self.balls.set_velocities(ball_vel, self.env_ids)
+        
         
         target_vel = self.target.get_velocities()
         forces_target = self._get_dummy_policy_prey()
         
         # fixed velocity
         target_vel[:,:3] = self.v_prey * forces_target / (torch.norm(forces_target, dim=1).unsqueeze(1) + 1e-5)
+        # target_vel[:,3] *= 0
         
         self.target.set_velocities(target_vel.type(torch.float32), self.env_ids)
         
@@ -571,21 +592,7 @@ class PredatorPrey_debug(IsaacEnv):
         }, self.batch_size)
     
 
-    def _norm(self, x):
-        y = x / ((torch.norm(x, dim=-1, keepdim=True)).expand_as(x) + 1e-5)
-        return y
     
-    
-    def _pforce(self, x):
-        # 一次反比斥力
-        y = self._norm(x) / (torch.norm(x, dim=-1, keepdim=True).expand_as(x) + 1e-5)
-        return y
-    
-    def mapping(self, x, idx):
-        # return x[index]
-        flat_idx = idx.view(-1).long()
-        y = torch.index_select(x, dim=0, index=flat_idx).view(idx.shape)
-        return y 
     
     def APF_convert(self, x):
         _max = torch.argmax(x, dim=-1, keepdim=True)
@@ -594,48 +601,13 @@ class PredatorPrey_debug(IsaacEnv):
         action = torch.concat([miu, lamb], dim=-1)
         return action
     
-        
-    @property
-    def drone_pos(self):
-        self.drone_states = self.drone.get_state()
-        drone_pos = self.drone_states[..., :3]
-        return drone_pos
-    
-    @property
-    def drone_vel(self):
-        drone_vel = self.drone.get_velocities()[..., :3]
-        return drone_vel
-    
-    @property
-    def drone_rot(self):
-        drone_rot = self.drone.get_state()[..., 3:7]
-        return drone_rot
 
-    @property
-    def prey_pos(self):
-        prey_pos, _ = self.get_env_poses(self.target.get_world_poses())
-        return prey_pos
-    
-    @property
-    def prey_vel(self):
-        prey_vel = self.target.get_velocities()[..., :3]
-        return prey_vel
-    
-    @property
-    def obstacle_pos(self):
-        if self.num_obstacles>0:
-            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
-        else:
-            obstacle_pos = None
-        return obstacle_pos
-    
     
     # 控制器
     def _ctrl_target(self, policy, dt=0.016):
-        # vel=0: 可以悬停
-        
-    # 当前状态
-        target_pos = self.drone_pos + self._norm(policy) * dt * 0
+        # vel=0: 可以悬停        
+        # 当前状态
+        target_pos = self.drone_pos # 不做贡献
         target_vel = self.drone_vel + self._norm(policy) * dt
         target_yaw = quaternion_to_euler(self.drone_rot)[..., 2].unsqueeze(-1) # unchanged
         
@@ -654,33 +626,35 @@ class PredatorPrey_debug(IsaacEnv):
     def obs_repel(self):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         if self.num_obstacles > 0:
-            drone_to_obs = self.cross_diff(self.drone_pos, self.obstacle_pos)
-            force = torch.sum(self._pforce(drone_to_obs), dim=-2)
+            ball_to_obs = self.cross_diff(self.ball_pos, self.obstacle_pos)
+            force = torch.sum(self._pforce(ball_to_obs), dim=-2)
         return force
+    
+    
 
     def Janasov(self, C_inter=0.5, r_inter=0.5, obs=0.2):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
         prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.drone_pos)
+        chase_force = self._norm(prey_pos - self.ball_pos)
         
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-5
-        repel = - torch.sum(drone_to_drone - r_inter * self._norm(drone_to_drone), dim=-2) # 拆开了
+        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos) + 1e-5
+        repel = - torch.sum(ball_to_ball - r_inter * self._norm(ball_to_ball), dim=-2) # 拆开了
         force = chase_force + C_inter * self._norm(repel) + self.obs_repel() * obs
         return force
     
     def Ange(self, rf=0.3, sigma=0.5, beta=1.0, yita=3.0):
         # Angelani alignment
-        R_vel = torch.mean(self.drone_vel, dim=-2, keepdim=True).expand_as(self.drone_vel)
+        R_vel = torch.mean(self.ball_vel, dim=-2, keepdim=True).expand_as(self.ball_vel)
         
         # chase
         prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.drone_pos)
+        chase_force = self._norm(prey_pos - self.ball_pos)
         
         # repulse 只有斥力
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-5
-        direction_p = self._norm(drone_to_drone)
-        norm_p = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone)
+        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos) + 1e-5
+        direction_p = self._norm(ball_to_ball)
+        norm_p = torch.norm(ball_to_ball, dim=-1, keepdim=True).expand_as(ball_to_ball)
         force_p = torch.sum(direction_p /(1 + torch.exp((norm_p - rf)/sigma)), dim=-2)
         
         force = R_vel + beta * force_p + yita * chase_force + self.obs_repel()
@@ -693,34 +667,33 @@ class PredatorPrey_debug(IsaacEnv):
         
         # chase
         prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        force += self._norm(prey_pos - self.drone_pos)
+        force += self._norm(prey_pos - self.ball_pos)
         
         # miu: obstacle        
         if self.num_obstacles > 0:
-            drone_to_obs = self.cross_diff(self.drone_pos, self.obstacle_pos)
-            dist_obs = torch.norm(drone_to_obs, dim=-1, keepdim=True).expand_as(drone_to_obs)
+            ball_to_obs = self.cross_diff(self.ball_pos, self.obstacle_pos)
+            dist_obs = torch.norm(ball_to_obs, dim=-1, keepdim=True).expand_as(ball_to_obs)
             force += miu * torch.sum(torch.relu(ro - dist_obs)/dist_obs**3/ro * self._norm(dist_obs), dim=-2) 
         
         # lamb: interaction
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos)
-        dist_drone = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone) + 1e-5
-        force -= torch.sum((0.5 - lamb / dist_drone) * self._norm(drone_to_drone), dim=-2) # 拆开了 注意是减号
+        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos)
+        dist_ball = torch.norm(ball_to_ball, dim=-1, keepdim=True).expand_as(ball_to_ball) + 1e-5
+        force -= torch.sum((0.5 - lamb / dist_ball) * self._norm(ball_to_ball), dim=-2) # 拆开了 注意是减号
         
         return force
 
 
     def _get_dummy_policy_prey(self):
-        pos, _ = self.drone.get_world_poses(False)
-        prey_pos, _ = self.target.get_world_poses()
-        prey_pos = prey_pos.unsqueeze(1)
+        pos = self.ball_pos
+        prey_pos = self.prey_pos
         
         force = torch.zeros(self.num_envs, 3, device=self.device)
 
         # predators
-        # active mask : if drone is failed, do not get force from it
-        drone_vel = self.drone.get_velocities()
-        active_mask = (torch.norm(drone_vel[...,:3],dim=-1) > 1e-5).unsqueeze(-1).expand(-1,-1,3)
-        prey_pos_all = prey_pos.expand(-1,self.num_agents,-1)
+        # active mask : if ball is failed, do not get force from it
+        # ball_vel = self.ball.get_velocities()
+        # active_mask = (torch.norm(ball_vel[...,:3],dim=-1) > 1e-5).unsqueeze(-1).expand(-1,-1,3)
+        prey_pos_all = prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         dist_pos = torch.norm(prey_pos_all - pos,dim=-1).unsqueeze(-1).expand(-1,-1,3)
         direction_p = (prey_pos_all - pos) / (dist_pos + 1e-5)
         # force_p = direction_p * (1 / (dist_pos + 1e-5)) * active_mask
@@ -731,13 +704,14 @@ class PredatorPrey_debug(IsaacEnv):
         # 3D
         prey_env_pos, _ = self.get_env_poses(self.target.get_world_poses())
         force_r = torch.zeros_like(force)
-        force_r[...,0] = 1 / (prey_env_pos[:,0] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,0] + 1e-5)
-        force_r[...,1] = 1 / (prey_env_pos[:,1] - (- self.size_list) + 1e-5) - 1 / (self.size_list - prey_env_pos[:,1] + 1e-5)
-        force_r[...,2] += 1 / (prey_env_pos[:,2] - 0 + 1e-5) - 1 / (2 * self.size_list - prey_env_pos[:,2] + 1e-5)
+        force_r[...,0] = 1 / (torch.relu(prey_env_pos[:,0] - (- self.size_list)) + 1e-13) - 1 / (torch.relu(self.size_list - prey_env_pos[:,0]) + 1e-13)
+        force_r[...,1] = 1 / (torch.relu(prey_env_pos[:,1] - (- self.size_list)) + 1e-13) - 1 / (torch.relu(self.size_list - prey_env_pos[:,1]) + 1e-13)
+        force_r[...,2] = 1 / (torch.relu(prey_env_pos[:,2] - (0)) + 1e-13) - 1 / (torch.relu(2 * self.size_list - prey_env_pos[:,2]) + 1e-13)
         force += force_r
 
         # obstacles
-        obstacle_pos, _ = self.obstacles.get_world_poses()
+        obstacle_pos = self.obstacle_pos
+        prey_pos = prey_pos.unsqueeze(1).expand(-1,self.num_obstacles,-1)
         dist_pos = torch.norm(prey_pos[..., :3] - obstacle_pos[..., :3],dim=-1).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
         direction_o = (prey_pos[..., :3] - obstacle_pos[..., :3]) / (dist_pos + 1e-5)
         force_o = direction_o * (1 / (dist_pos + 1e-5))
@@ -746,3 +720,63 @@ class PredatorPrey_debug(IsaacEnv):
         # set force_z to 0
         return force.type(torch.float32)
     
+        
+    @property
+    def drone_pos(self):
+        self.drone_states = self.drone.get_state()
+        drone_pos = self.drone_states[..., :3]
+        return drone_pos
+    
+    @property
+    def drone_vel(self):
+        drone_vel = self.drone.get_velocities()[..., :3]
+        return drone_vel
+    
+    @property
+    def drone_rot(self):
+        drone_rot = self.drone.get_state()[..., 3:7]
+        return drone_rot
+    
+    @property
+    def ball_pos(self):
+        ball_pos, _ = self.get_env_poses(self.balls.get_world_poses())
+        return ball_pos
+    
+    @property
+    def ball_vel(self):
+        ball_vel = self.balls.get_velocities()[..., :3]
+        return ball_vel
+    
+    @property
+    def prey_pos(self):
+        prey_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        return prey_pos
+    
+    @property
+    def prey_vel(self):
+        prey_vel = self.target.get_velocities()[..., :3]
+        return prey_vel
+    
+    @property
+    def obstacle_pos(self):
+        if self.num_obstacles>0:
+            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
+        else:
+            obstacle_pos = None
+        return obstacle_pos
+    
+    def _norm(self, x):
+        y = x / ((torch.norm(x, dim=-1, keepdim=True)).expand_as(x) + 1e-5)
+        return y
+    
+    
+    def _pforce(self, x):
+        # 一次反比斥力
+        y = self._norm(x) / (torch.norm(x, dim=-1, keepdim=True).expand_as(x) + 1e-5)
+        return y
+    
+    def mapping(self, x, idx):
+        # return x[index]
+        flat_idx = idx.view(-1).long()
+        y = torch.index_select(x, dim=0, index=flat_idx).view(idx.shape)
+        return y 

@@ -8,7 +8,7 @@ defaults:
 
 env:
   num_envs: 128
-  env_spacing: 4
+  # env_spacing: 2
 
 drone_model: Crazyflie
 force_sensor: false
