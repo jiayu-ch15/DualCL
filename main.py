@@ -68,8 +68,8 @@ def main(cfg):
     cfg.env.num_envs = 256
     cfg.headless = 1
     cfg.env.env_spacing = 3
-    cfg.num_obstacles = 2
-    video = 1
+    # cfg.num_obstacles = 5
+    video = 0
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -258,7 +258,7 @@ def main(cfg):
             print("recording...")
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
-            print("saved")
+            print("\nsaved! \n")
             break
             continue
 
