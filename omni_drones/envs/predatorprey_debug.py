@@ -41,8 +41,8 @@ class PredatorPrey_debug(IsaacEnv):
     # controller
     def _ctrl_target(self, policy, dt=0.016):
 
-        target_pos = self.drone_pos + policy * dt
-        target_vel = self.drone_vel + policy * dt
+        target_pos = self.drone_pos
+        target_vel = policy
         target_yaw = quaternion_to_euler(self.drone_rot)[..., 2].unsqueeze(-1) # unchanged
         
         return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
@@ -87,7 +87,7 @@ class PredatorPrey_debug(IsaacEnv):
         self.obstacle_control_fre = self.cfg.obstacle_control_fre
 
         controller_cls = self.drone.DEFAULT_CONTROLLER
-        controller_cls = LeePositionController
+        # controller_cls = LeePositionController
         self.controller = controller_cls(
             self.dt, 
             9.81, 
@@ -329,9 +329,9 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
+        # policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
         # policy = self.Ange(rf=0.3, sigma=0.5, beta=1.0, yita=3.0)
-        # policy = self.APF()
+        policy = self.APF()
         
         control_target = self._ctrl_target(policy, self.dt)
 
