@@ -36,67 +36,17 @@ from omni_drones.controllers import LeePositionController
 # drones on land by default
 # only cubes are available as walls
 
-class CurriculumBuffer(object):
-
-    def __init__(self, buffer_size, scenario='mpe'):
-        self.eps = 1e-10
-        self.buffer_size = buffer_size
-        self.scenario = scenario
-
-        self._state_buffer = np.zeros((0, 1), dtype=np.float32)
-        self._weight_buffer = np.zeros((0, 1), dtype=np.float32)
-        self._task_space = []
-        self._temp_state_buffer = []
-        self._moving_max = 0.0
-        self._moving_min = 0.0
-
-    def insert(self, states):
-        """
-        input:
-            states: list of np.array(size=(state_dim, ))
-            weight: list of np.array(size=(1, ))
-        """
-        self._temp_state_buffer.append(copy.deepcopy(states))
-
-    def update_states(self):
-        start_time = time.time()
-
-        # concatenate to get all states
-        all_states = np.array(self._temp_state_buffer)
-
-        # update
-        if len(all_states) > 0:
-            self._state_buffer = copy.deepcopy(all_states)
-        # reset temp state and weight buffer
-        self._temp_state_buffer = []
-
-        # print update time
-        end_time = time.time()
-        print(f"curriculum buffer update states time: {end_time - start_time}s")
-
-        return self._state_buffer.copy()
-
-    def update_weights(self, weights):
-        self._weight_buffer = weights.copy()
-
-    def sample(self, num_samples):
-        """
-        return list of np.array
-        """
-        if self._state_buffer.shape[0] == 0:  # state buffer is empty
-            initial_states = [None for _ in range(num_samples)]
-        else:
-            weights = self._weight_buffer / np.mean(self._weight_buffer)
-            probs = weights / np.sum(weights)
-            sample_idx = np.random.choice(self._state_buffer.shape[0], num_samples, replace=True, p=probs)
-            initial_states = [self._state_buffer[idx] for idx in sample_idx]
-        return initial_states
-    
-    def save_task(self, model_dir, episode):
-        np.save('{}/tasks_{}.npy'.format(model_dir,episode), self._state_buffer)
-        np.save('{}/scores_{}.npy'.format(model_dir,episode), self._weight_buffer)
-
 class PredatorPrey_debug(IsaacEnv): 
+    
+    # controller
+    def _ctrl_target(self, policy, dt=0.016):
+
+        target_pos = self.drone_pos + policy * dt
+        target_vel = self.drone_vel + policy * dt
+        target_yaw = quaternion_to_euler(self.drone_rot)[..., 2].unsqueeze(-1) # unchanged
+        
+        return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
+    
     def __init__(self, cfg, headless):
         super().__init__(cfg, headless)
         self.drone.initialize()
@@ -114,8 +64,6 @@ class PredatorPrey_debug(IsaacEnv):
             # track_contact_forces=True
         )
         self.obstacles.initialize()
-        
-
         
         self.time_encoding = self.cfg.task.time_encoding
 
@@ -203,6 +151,9 @@ class PredatorPrey_debug(IsaacEnv):
         self.observation_spec["info"] = info_spec
         self.info = info_spec.zero()
         
+    
+    
+    
     def _design_scene(self):
         self.num_agents = self.cfg.num_agents
         self.num_obstacles = self.cfg.num_obstacles
@@ -561,89 +512,7 @@ class PredatorPrey_debug(IsaacEnv):
         }, self.batch_size)
     
 
-    def _norm(self, x):
-        y = x / ((torch.norm(x, dim=-1, keepdim=True)).expand_as(x) + 1e-5)
-        return y
     
-    
-    def _pforce(self, x):
-        # 一次反比斥力
-        y = self._norm(x) / (torch.norm(x, dim=-1, keepdim=True).expand_as(x) + 1e-5)
-        return y
-    
-    def mapping(self, x, idx):
-        # return x[index]
-        flat_idx = idx.view(-1).long()
-        y = torch.index_select(x, dim=0, index=flat_idx).view(idx.shape)
-        return y 
-    
-    def APF_convert(self, x):
-        _max = torch.argmax(x, dim=-1, keepdim=True)
-        miu = self.mapping(self.miu_list, _max//6)
-        lamb = self.mapping(self.lamb_list, _max%6)
-        action = torch.concat([miu, lamb], dim=-1)
-        return action
-    
-        
-    @property
-    def drone_pos(self):
-        self.drone_states = self.drone.get_state()
-        drone_pos = self.drone_states[..., :3]
-        return drone_pos
-    
-    @property
-    def drone_vel(self):
-        drone_vel = self.drone.get_velocities()[..., :3]
-        return drone_vel
-    
-    @property
-    def drone_rot(self):
-        drone_rot = self.drone.get_state()[..., 3:7]
-        return drone_rot
-
-    @property
-    def prey_pos(self):
-        prey_pos, _ = self.get_env_poses(self.target.get_world_poses())
-        return prey_pos
-    
-    @property
-    def prey_vel(self):
-        prey_vel = self.target.get_velocities()[..., :3]
-        return prey_vel
-    
-    @property
-    def obstacle_pos(self):
-        if self.num_obstacles>0:
-            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
-        else:
-            obstacle_pos = None
-        return obstacle_pos
-    
-    
-    # controller
-    def _ctrl_target(self, policy, dt=0.016):
-
-        target_pos = self.drone_pos + policy * dt
-        target_vel = self.drone_vel + policy * dt * 0
-        target_yaw = quaternion_to_euler(self.drone_rot)[..., 2].unsqueeze(-1) # unchanged
-        
-        return torch.cat([target_pos, target_vel, target_yaw], dim=-1)
-        
-    
-    def cross_diff(self, x, y):
-        # 4096*n*3
-        m = x.size()[-2]
-        n = y.size()[-2]
-        x2 = x.unsqueeze(-2).expand(-1,-1,n,-1)
-        y2 = y.unsqueeze(-3).expand(-1,m,-1,-1)
-        return x2-y2
-    
-    def obs_repel(self):
-        force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
-        if self.num_obstacles > 0:
-            drone_to_obs = self.cross_diff(self.drone_pos, self.obstacle_pos)
-            force = torch.sum(self._pforce(drone_to_obs), dim=-2)
-        return force
 
     def Janasov(self, C_inter=0.5, r_inter=0.5, obs=0.2):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
@@ -733,3 +602,74 @@ class PredatorPrey_debug(IsaacEnv):
         # set force_z to 0
         return force.type(torch.float32)
     
+    def _norm(self, x):
+        y = x / ((torch.norm(x, dim=-1, keepdim=True)).expand_as(x) + 1e-5)
+        return y
+    
+    
+    def _pforce(self, x):
+        # 一次反比斥力
+        y = self._norm(x) / (torch.norm(x, dim=-1, keepdim=True).expand_as(x) + 1e-5)
+        return y
+    
+    def mapping(self, x, idx):
+        # return x[index]
+        flat_idx = idx.view(-1).long()
+        y = torch.index_select(x, dim=0, index=flat_idx).view(idx.shape)
+        return y 
+    
+    def APF_convert(self, x):
+        _max = torch.argmax(x, dim=-1, keepdim=True)
+        miu = self.mapping(self.miu_list, _max//6)
+        lamb = self.mapping(self.lamb_list, _max%6)
+        action = torch.concat([miu, lamb], dim=-1)
+        return action
+    
+    def cross_diff(self, x, y):
+        # 4096*n*3
+        m = x.size()[-2]
+        n = y.size()[-2]
+        x2 = x.unsqueeze(-2).expand(-1,-1,n,-1)
+        y2 = y.unsqueeze(-3).expand(-1,m,-1,-1)
+        return x2-y2
+    
+    def obs_repel(self):
+        force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
+        if self.num_obstacles > 0:
+            drone_to_obs = self.cross_diff(self.drone_pos, self.obstacle_pos)
+            force = torch.sum(self._pforce(drone_to_obs), dim=-2)
+        return force
+    
+    @property
+    def drone_pos(self):
+        self.drone_states = self.drone.get_state()
+        drone_pos = self.drone_states[..., :3]
+        return drone_pos
+    
+    @property
+    def drone_vel(self):
+        drone_vel = self.drone.get_velocities()[..., :3]
+        return drone_vel
+    
+    @property
+    def drone_rot(self):
+        drone_rot = self.drone.get_state()[..., 3:7]
+        return drone_rot
+
+    @property
+    def prey_pos(self):
+        prey_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        return prey_pos
+    
+    @property
+    def prey_vel(self):
+        prey_vel = self.target.get_velocities()[..., :3]
+        return prey_vel
+    
+    @property
+    def obstacle_pos(self):
+        if self.num_obstacles>0:
+            obstacle_pos, _ = self.get_env_poses(self.obstacles.get_world_poses())
+        else:
+            obstacle_pos = None
+        return obstacle_pos
