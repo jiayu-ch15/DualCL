@@ -403,10 +403,10 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        # policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.2)
-        # policy = self.Ange(rf=0.3, sigma=0.5, beta=1.0, yita=3.0)
-        policy = self.APF()
-        
+        # policy = self.Janasov(C_inter=0.3, r_inter=0.3, obs=0.2)
+        # policy = self.Ange(rf=0.3)
+        policy = self.APF(lamb=0.3)
+        # 
         control_target = self._ctrl_target(policy, self.dt)
 
         root_state = self.drone.get_state(env=True)[..., :13].squeeze(0)
@@ -519,10 +519,15 @@ class PredatorPrey_debug(IsaacEnv):
         drone_pos, _ = self.drone.get_world_poses()
         target_pos, _ = self.target.get_world_poses()
         target_pos = target_pos.unsqueeze(1)
+        
+        ball_pos = self.ball_pos
+        target_pos = self.target_pos
 
-        target_dist = torch.norm(target_pos - drone_pos, dim=-1)
+        # target_dist = torch.norm(target_pos - drone_pos, dim=-1)
+        target_dist = torch.norm(target_pos - ball_pos, dim=-1)
 
         capture_flag = (target_dist < self.catch_radius)
+        
         self.info['capture_episode'].add_(torch.sum(capture_flag, dim=1).unsqueeze(-1))
         self.info['capture'].set_((self.info['capture_episode'] > 0).type(torch.float32))
         # self.info['capture'].set_(torch.from_numpy(self.info['capture_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
@@ -635,24 +640,31 @@ class PredatorPrey_debug(IsaacEnv):
     def Janasov(self, C_inter=0.5, r_inter=0.5, obs=0.2):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
-        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.ball_pos)
+        ball_pos = self.ball_pos        
         
-        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos) + 1e-5
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
+        chase_force = self._norm(prey_pos - ball_pos)
+        
+        ball_to_ball = self.cross_diff(ball_pos, ball_pos) + 1e-9
         repel = - torch.sum(ball_to_ball - r_inter * self._norm(ball_to_ball), dim=-2) # 拆开了
         force = chase_force + C_inter * self._norm(repel) + self.obs_repel() * obs
+        # force = chase_force
         return force
     
     def Ange(self, rf=0.3, sigma=0.5, beta=1.0, yita=3.0):
+        force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         # Angelani alignment
-        R_vel = torch.mean(self.ball_vel, dim=-2, keepdim=True).expand_as(self.ball_vel)
+        ball_vel = self.ball_vel
+        R_vel = torch.mean(ball_vel, dim=-2, keepdim=True).expand_as(ball_vel)
+        
+        ball_pos = self.ball_pos
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         
         # chase
-        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.ball_pos)
+        chase_force = self._norm(prey_pos - ball_pos)
         
         # repulse 只有斥力
-        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos) + 1e-5
+        ball_to_ball = self.cross_diff(ball_pos, ball_pos) + 1e-9
         direction_p = self._norm(ball_to_ball)
         norm_p = torch.norm(ball_to_ball, dim=-1, keepdim=True).expand_as(ball_to_ball)
         force_p = torch.sum(direction_p /(1 + torch.exp((norm_p - rf)/sigma)), dim=-2)
@@ -665,19 +677,21 @@ class PredatorPrey_debug(IsaacEnv):
     def APF(self, miu=0.5, lamb=0.5, ro=0.3):        
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
+        ball_pos = self.ball_pos
+        
         # chase
         prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        force += self._norm(prey_pos - self.ball_pos)
+        force += self._norm(prey_pos - ball_pos)
         
         # miu: obstacle        
         if self.num_obstacles > 0:
-            ball_to_obs = self.cross_diff(self.ball_pos, self.obstacle_pos)
+            ball_to_obs = self.cross_diff(ball_pos, self.obstacle_pos)
             dist_obs = torch.norm(ball_to_obs, dim=-1, keepdim=True).expand_as(ball_to_obs)
             force += miu * torch.sum(torch.relu(ro - dist_obs)/dist_obs**3/ro * self._norm(dist_obs), dim=-2) 
         
         # lamb: interaction
-        ball_to_ball = self.cross_diff(self.ball_pos, self.ball_pos)
-        dist_ball = torch.norm(ball_to_ball, dim=-1, keepdim=True).expand_as(ball_to_ball) + 1e-5
+        ball_to_ball = self.cross_diff(ball_pos, ball_pos)
+        dist_ball = torch.norm(ball_to_ball, dim=-1, keepdim=True).expand_as(ball_to_ball) + 1e-9
         force -= torch.sum((0.5 - lamb / dist_ball) * self._norm(ball_to_ball), dim=-2) # 拆开了 注意是减号
         
         return force

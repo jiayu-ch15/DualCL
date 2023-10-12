@@ -323,15 +323,18 @@ class PredatorPrey_debug(IsaacEnv):
         self.step_spec += 1
         actions = tensordict[("action", "drone.action")]
         
+        # fps 4096: 1.6e5
+        
         # APF_RL
         # actions_APF = self.APF_convert(actions)
         # policy = self.APF(miu=actions_APF[..., 0].unsqueeze(-1).expand(-1,-1,3),
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        # policy = self.Janasov(C_inter=0.0, r_inter=0.6, obs=0.0)
-        policy = self.Ange(rf=0.1)
-        # policy = self.APF()
+        # rule-based
+        # policy = self.Janasov(C_inter=0.3, r_inter=0.3, obs=0.2)
+        # policy = self.Ange(rf=0.3)
+        policy = self.APF(lamb=0.3)
         
         policy = self._norm(policy)
         control_target = self._ctrl_target(policy, self.dt)
@@ -512,31 +515,34 @@ class PredatorPrey_debug(IsaacEnv):
             # "progress_std": self.progress_std**torch.ones(self.num_envs, device=self.device)
         }, self.batch_size)
     
-
-    
-
     def Janasov(self, C_inter=0.5, r_inter=0.5, obs=0.2):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
-        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.drone_pos)
+        drone_pos = self.drone_pos        
         
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-9
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
+        chase_force = self._norm(prey_pos - drone_pos)
+        
+        drone_to_drone = self.cross_diff(drone_pos, drone_pos) + 1e-9
         repel = - torch.sum(drone_to_drone - r_inter * self._norm(drone_to_drone), dim=-2) # 拆开了
         force = chase_force + C_inter * self._norm(repel) + self.obs_repel() * obs
         # force = chase_force
         return force
     
     def Ange(self, rf=0.3, sigma=0.5, beta=1.0, yita=3.0):
+        force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         # Angelani alignment
-        R_vel = torch.mean(self.drone_vel, dim=-2, keepdim=True).expand_as(self.drone_vel)
+        drone_vel = self.drone_vel
+        R_vel = torch.mean(drone_vel, dim=-2, keepdim=True).expand_as(drone_vel)
+        
+        drone_pos = self.drone_pos
+        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
         
         # chase
-        prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        chase_force = self._norm(prey_pos - self.drone_pos)
+        chase_force = self._norm(prey_pos - drone_pos)
         
         # repulse 只有斥力
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos) + 1e-9
+        drone_to_drone = self.cross_diff(drone_pos, drone_pos) + 1e-9
         direction_p = self._norm(drone_to_drone)
         norm_p = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone)
         force_p = torch.sum(direction_p /(1 + torch.exp((norm_p - rf)/sigma)), dim=-2)
@@ -549,18 +555,20 @@ class PredatorPrey_debug(IsaacEnv):
     def APF(self, miu=0.5, lamb=0.5, ro=0.3):        
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)
         
+        drone_pos = self.drone_pos
+        
         # chase
         prey_pos = self.prey_pos.unsqueeze(1).expand(-1,self.num_agents,-1)
-        force += self._norm(prey_pos - self.drone_pos)
+        force += self._norm(prey_pos - drone_pos)
         
         # miu: obstacle        
         if self.num_obstacles > 0:
-            drone_to_obs = self.cross_diff(self.drone_pos, self.obstacle_pos)
+            drone_to_obs = self.cross_diff(drone_pos, self.obstacle_pos)
             dist_obs = torch.norm(drone_to_obs, dim=-1, keepdim=True).expand_as(drone_to_obs)
             force += miu * torch.sum(torch.relu(ro - dist_obs)/dist_obs**3/ro * self._norm(dist_obs), dim=-2) 
         
         # lamb: interaction
-        drone_to_drone = self.cross_diff(self.drone_pos, self.drone_pos)
+        drone_to_drone = self.cross_diff(drone_pos, drone_pos)
         dist_drone = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone) + 1e-9
         force -= torch.sum((0.5 - lamb / dist_drone) * self._norm(drone_to_drone), dim=-2) # 拆开了 注意是减号
         

@@ -65,11 +65,11 @@ class Every:
 def main(cfg):
 
     train = 0
-    cfg.env.num_envs = 256
+    cfg.env.num_envs = 1024
     cfg.headless = 1
     cfg.env.env_spacing = 3
     # cfg.num_obstacles = 5
-    video = 0
+    video = 1
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -281,8 +281,8 @@ def main(cfg):
     
     logging.info(f"Final Eval at {collector._frames} steps.")
     info = {"env_frames": collector._frames}
-    info.update(evaluate())
-    run.log(info)
+    # info.update(evaluate())
+    # run.log(info)
 
     if hasattr(policy, "state_dict") and 0:
         ckpt_path = os.path.join(run.dir, "checkpoint_final.pt")
