@@ -63,13 +63,16 @@ class Every:
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
+    
+    # python main.py
 
     train = 0
-    cfg.env.num_envs = 1024
+    cfg.env.num_envs = 128
     cfg.headless = 1
     cfg.env.env_spacing = 3
     # cfg.num_obstacles = 5
-    video = 1
+    cfg.use_dynamic = 0 # use config for easy
+    video = 0
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)

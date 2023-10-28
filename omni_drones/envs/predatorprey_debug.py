@@ -85,6 +85,8 @@ class PredatorPrey_debug(IsaacEnv):
         self.v_obstacle_min = self.cfg.v_drone * self.cfg.v_obstacle_min
         self.v_obstacle_max = self.cfg.v_drone * self.cfg.v_obstacle_max
         self.obstacle_control_fre = self.cfg.obstacle_control_fre
+        
+        self.use_dynamic = self.cfg.use_dynamic
 
         controller_cls = self.drone.DEFAULT_CONTROLLER
         self.controller = controller_cls(
@@ -241,8 +243,12 @@ class PredatorPrey_debug(IsaacEnv):
         target_pos = []
         self.size_list = []
         # reset size
+          
         for idx in range(n_envs):
-            size = self.size_dist.sample().item()
+            if self.cfg.use_dynamic:
+                size = self.size_min
+            else:    
+                size = self.size_dist.sample().item()
             
             self.size_list.append(size)
         
@@ -297,6 +303,15 @@ class PredatorPrey_debug(IsaacEnv):
         # reset velocity of obstacles
         self.v_obstacle = torch.from_numpy(np.random.uniform(self.v_obstacle_min, self.v_obstacle_max, [self.num_envs, 1])).to(self.device)
         
+        if self.use_dynamic:
+            self.v_prey = [self.v_low] * self.num_envs
+            self.size_list = [self.size_min] * self.num_envs
+            self.v_obstacle = [self.v_obstacle_min] * self.num_envs
+            self.v_prey = torch.Tensor(np.array(self.v_prey)).to(self.device).unsqueeze(-1)
+            self.size_list = torch.Tensor(np.array(self.size_list)).to(self.device)
+            self.v_obstacle = torch.Tensor(np.array(self.v_obstacle)).to(self.device).unsqueeze(-1)
+        
+        
         print("result: ")
         print("capture_per_step: ", self.info["capture_per_step"].mean())
         print("capture_", self.info["capture"].mean())
@@ -318,10 +333,20 @@ class PredatorPrey_debug(IsaacEnv):
         }).expand(self.num_envs).to(self.device)
         self.info = info_spec.zero()
         self.step_spec = 0
+        
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
         self.step_spec += 1
         actions = tensordict[("action", "drone.action")]
+        
+        if self.use_dynamic:
+            if self.step_spec == self.max_episode_length // 2:
+                self.v_prey = [self.v_high] * self.num_envs
+                self.size_list = [self.size_max] * self.num_envs
+                self.v_obstacle = [self.v_obstacle_max] * self.num_envs
+                self.v_prey = torch.Tensor(np.array(self.v_prey)).to(self.device).unsqueeze(-1)
+                self.size_list = torch.Tensor(np.array(self.size_list)).to(self.device)
+                self.v_obstacle = torch.Tensor(np.array(self.v_obstacle)).to(self.device).unsqueeze(-1)
         
         # fps 4096: 1.6e5
         
@@ -332,9 +357,9 @@ class PredatorPrey_debug(IsaacEnv):
 
         # rule-based
         # rule-based
-        # policy = self.Janasov(C_inter=0.3, r_inter=0.3, obs=0.2)
-        # policy = self.Ange(rf=0.3)
-        policy = self.APF(lamb=0.3)
+        policy = self.Janasov(C_inter=0.2, r_inter=0.3, obs=0.0)
+        # policy = self.Ange(rf=0.2, yita=6)
+        # policy = self.APF(lamb=0.3)
         
         policy = self._norm(policy)
         control_target = self._ctrl_target(policy, self.dt)
@@ -547,7 +572,7 @@ class PredatorPrey_debug(IsaacEnv):
         norm_p = torch.norm(drone_to_drone, dim=-1, keepdim=True).expand_as(drone_to_drone)
         force_p = torch.sum(direction_p /(1 + torch.exp((norm_p - rf)/sigma)), dim=-2)
         
-        force = R_vel + beta * force_p + yita * chase_force + self.obs_repel()
+        force = R_vel + beta * force_p + yita * chase_force + self.obs_repel()*0.0
         # force = chase_force
         
         return force
