@@ -357,9 +357,9 @@ class PredatorPrey_debug(IsaacEnv):
 
         # rule-based
         # rule-based
-        policy = self.Janasov(C_inter=0.2, r_inter=0.3, obs=0.0)
+        # policy = self.Janasov(C_inter=0.2, r_inter=0.3, obs=0.0)
         # policy = self.Ange(rf=0.2, yita=6)
-        # policy = self.APF(lamb=0.3)
+        policy = self.APF(lamb=0.3)
         
         policy = self._norm(policy)
         control_target = self._ctrl_target(policy, self.dt)

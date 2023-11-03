@@ -70,9 +70,9 @@ def main(cfg):
     cfg.env.num_envs = 128
     cfg.headless = 1
     cfg.env.env_spacing = 3
-    # cfg.num_obstacles = 5
+    cfg.num_obstacles = 5
     cfg.use_dynamic = 0 # use config for easy
-    video = 0
+    video = 1
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -175,9 +175,7 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-    # camera.spawn(["/World/Camera"], translations=[(0.0, 0, 10)], targets=[(2.5, 2.5, 0.5)])
-    # camera.spawn(["/World/Camera"], translations=[(0.0, 0, 15)], targets=[(2.5, 2.5, 0.5)])
-    camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 7.5)], targets=[(0.0, 0.0, 0.0)])
+    camera.spawn(["/World/Camera"], translations=[(1.0, 1.0, 5.0)], targets=[(0.0, 0.0, 0.0)])
     camera.initialize("/World/Camera")
 
     # TODO: create a agent_spec view for TransformedEnv
@@ -214,43 +212,43 @@ def main(cfg):
     )
 
     @torch.no_grad()
-    def evaluate():
+    def evaluate(policy):
         frames = []
 
         def record_frame(*args, **kwargs):
             frame = camera.get_images()["rgb"][0]
             frames.append(frame.cpu())
-            
 
         base_env.enable_render(True)
         env.eval()
-        env.rollout(
+        base_env.set_train = False
+        eval_info = env.rollout(
             max_steps=base_env.max_episode_length,
             policy=policy,
             callback=Every(record_frame, 2),
             auto_reset=True,
             break_when_any_done=False,
             return_contiguous=False
-        )
+        )['info']
         base_env.enable_render(not cfg.headless)
         env.reset()
         env.train()
+        base_env.set_train = True
 
         if len(frames):
             video_array = torch.stack(frames)
             info["recording"] = wandb.Video(
                 video_array, fps=0.5 / cfg.sim.dt, format="mp4"
             )
-            
-            video_array = video_array.permute([0,2,3,1])[..., :3]
-            torchvision.io.write_video('animation.mp4', video_array=video_array, fps=63)
-            
-            
-        wandb.save()
+        for idx, frame in enumerate(frames):
+            image = Image.fromarray(frame.cpu().numpy().swapaxes(0, 2).swapaxes(0, 1))
+            image.save("frame_{}.png".format(idx))
         frames.clear()
+        info['capture'] = eval_info['capture'][:,-1].mean()
+        info['capture_per_step'] = eval_info['capture_per_step'][:,-1].mean()
+        info['cover_rate'] = eval_info['cover_rate'][:,-1].mean()
         return info
 
-    
 
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
