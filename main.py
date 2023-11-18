@@ -67,12 +67,12 @@ def main(cfg):
     # python main.py
 
     train = 0
-    cfg.env.num_envs = 128
+    cfg.env.num_envs = 1
     cfg.headless = 1
     cfg.env.env_spacing = 3
-    # cfg.num_obstacles = 5
+    cfg.num_obstacles = 5
     cfg.use_dynamic = 0 # use config for easy
-    video = 0
+    video = 1
 
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
@@ -259,12 +259,13 @@ def main(cfg):
         if train:
             info.update(policy.train_op(data))
 
-        if video and eval_interval > 0 and i % eval_interval == 0:
+        # if video and eval_interval > 0 and i % eval_interval == 0:
+        if video:
             print("recording...")
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
             print("\nsaved! \n")
-            break
+            # break
             continue
 
         if save_interval > 0 and i % save_interval == 0 and 0:

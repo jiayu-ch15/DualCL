@@ -209,13 +209,13 @@ class PredatorPrey_debug(IsaacEnv):
                 mass=1.0
             )
         
-        objects.VisualCuboid(
-            prim_path="/World/envs/env_0/ground",
-            name="ground",
-            translation= torch.tensor([0., 0., 0.], device=self.device),
-            scale=torch.tensor([self.size_max * 2, self.size_max * 2, 0.001], device=self.device),
-            color=torch.tensor([0., 0., 0.]),
-        )
+        # objects.VisualCuboid(
+        #     prim_path="/World/envs/env_0/ground",
+        #     name="ground",
+        #     translation= torch.tensor([0., 0., 0.], device=self.device),
+        #     scale=torch.tensor([self.size_max * 2, self.size_max * 2, 0.001], device=self.device),
+        #     color=torch.tensor([0., 0., 0.]),
+        # )
     
         kit_utils.set_rigid_body_properties(
             prim_path="/World/envs/env_0/target",
@@ -365,7 +365,8 @@ class PredatorPrey_debug(IsaacEnv):
         control_target = self._ctrl_target(policy, self.dt)
 
         root_state = self.drone.get_state(env=True)[..., :13].squeeze(0)
-        cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
+        # cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
+        cmds, _controller_state = vmap(vmap(self.controller))(root_state.unsqueeze(0), control_target, self.controller_state) # num_envs=1
         self.controller_state = _controller_state
         torch.nan_to_num_(cmds, 0.)
         actions = cmds

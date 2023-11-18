@@ -67,7 +67,7 @@ def main(cfg):
     # python main.py
 
     train = 0
-    cfg.env.num_envs = 128
+    cfg.env.num_envs = 1
     cfg.headless = 1
     cfg.env.env_spacing = 3
     cfg.num_obstacles = 5
@@ -242,11 +242,11 @@ def main(cfg):
             )
         for idx, frame in enumerate(frames):
             image = Image.fromarray(frame.cpu().numpy().swapaxes(0, 2).swapaxes(0, 1))
-            image.save("frame_{}.png".format(idx))
+            image.save("./main2/frame_{}.png".format(idx))
         frames.clear()
-        info['capture'] = eval_info['capture'][:,-1].mean()
-        info['capture_per_step'] = eval_info['capture_per_step'][:,-1].mean()
-        info['cover_rate'] = eval_info['cover_rate'][:,-1].mean()
+        # info['capture'] = eval_info['capture'][:,-1].mean()
+        # info['capture_per_step'] = eval_info['capture_per_step'][:,-1].mean()
+        # info['cover_rate'] = eval_info['cover_rate'][:,-1].mean()
         return info
 
 
@@ -257,12 +257,13 @@ def main(cfg):
         if train:
             info.update(policy.train_op(data))
 
-        if video and eval_interval > 0 and i % eval_interval == 0:
+        # if video and eval_interval > 0 and i % eval_interval == 0:
+        if 1:
             print("recording...")
             logging.info(f"Eval at {collector._frames} steps.")
-            info.update(evaluate())
+            info.update(evaluate(policy=policy))
             print("\nsaved! \n")
-            break
+            # break
             continue
 
         if save_interval > 0 and i % save_interval == 0 and 0:
