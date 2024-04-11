@@ -81,7 +81,7 @@ def main(cfg):
         "tdmpc": TDMPCPolicy
     }
 
-    env_class = IsaacEnv.REGISTRY[run.config]
+    env_class = IsaacEnv.REGISTRY[cfg.task.name]
     base_env = env_class(cfg, headless=cfg.headless)
     
     def log(info):
