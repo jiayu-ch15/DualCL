@@ -30,7 +30,7 @@ from pxr import UsdGeom, Usd, UsdPhysics
 import omni.isaac.core.utils.prims as prim_utils
 import omni.physx.scripts.utils as script_utils
 from omni_drones.utils.scene import design_scene
-from .utils import create_obstacle
+from ..utils import create_obstacle
 import pdb
 import copy
 from omni_drones.controllers import LeePositionController
@@ -50,7 +50,7 @@ def refresh_cylinder_pos_height(max_cylinder_height, origin_cylinder_pos, device
     origin_height = origin_height + ~low_cylinder_mask * 0.5 * max_cylinder_height
     return origin_cylinder_pos, origin_height
 
-class PredatorPrey_debug(IsaacEnv): 
+class HideAndSeek_circle_eval_large(IsaacEnv): 
     """
     HideAndSeek environment designed for curriculum learning.
 
@@ -787,8 +787,8 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        # policy = self.Janasov(C_inter=0.2, r_inter=0.3, obs=0.0)
-        policy = self.Ange(chase=3, rf=0.4, align=0.1, repel=0.3)
+        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.0)
+        # policy = self.Ange(chase=1, rf=0.4, align=0, repel=0.2)
         # policy = self.APF(lamb=0.3)
         
         # cylinders
@@ -801,13 +801,11 @@ class PredatorPrey_debug(IsaacEnv):
         drone_origin_dist = torch.norm(drone_pos[..., :2], dim=-1)
         force_r[..., :2] = - self._norm(drone_pos[..., :2]) / (torch.relu(self.arena_size - drone_origin_dist) + 1e-9).unsqueeze(-1)
         force_r[..., 2] = 1 / (torch.relu(drone_pos[...,2] - 0) + 1e-9) - 1 / (torch.relu(self.max_height - drone_pos[..., 2]) + 1e-9)
-        # policy += force_r
+        policy += force_r
 
         # policy = force_r
         
         # controller函数变了，需要重写
-
-        policy = self._norm(policy)
         
         # policy[..., 0] = 0
         # policy[..., 1] = 0
