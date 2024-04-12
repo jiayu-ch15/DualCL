@@ -29,9 +29,9 @@ from omni_drones.learning import (
     TD3Policy,
     MATD3Policy,
     TDMPCPolicy,
-    Policy,
-    PPOPolicy,
-    PPOAdaptivePolicy, PPORNNPolicy
+    # Policy,
+    # PPOPolicy,
+    # PPOAdaptivePolicy, PPORNNPolicy
 )
 
 from setproctitle import setproctitle
@@ -112,9 +112,9 @@ def main(cfg):
     # link RL algorithms
     from omni_drones.envs.isaac_env import IsaacEnv
     algos = {
-        "ppo": PPOPolicy,
-        "ppo_adaptive": PPOAdaptivePolicy,
-        "ppo_rnn": PPORNNPolicy,
+        # "ppo": PPOPolicy,
+        # "ppo_adaptive": PPOAdaptivePolicy,
+        # "ppo_rnn": PPORNNPolicy,
         "mappo": MAPPOPolicy, 
         "happo": HAPPOPolicy,
         "qmix": QMIXPolicy,
@@ -123,7 +123,7 @@ def main(cfg):
         "td3": TD3Policy,
         "matd3": MATD3Policy,
         "tdmpc": TDMPCPolicy,
-        "test": Policy
+        # "test": Policy
     }
 
     # init customize env class

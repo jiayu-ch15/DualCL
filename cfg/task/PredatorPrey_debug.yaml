@@ -14,8 +14,8 @@ force_sensor: false
 time_encoding: true
 
 # action_transform: multidiscrete:4
-action_transform: rate
-# action_transform: velocity
+# action_transform: rate
+action_transform: velocity
 
 # use rejection sampling validation
 use_validation: 1
