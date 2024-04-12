@@ -3,22 +3,20 @@ import os
 import time
 
 import hydra
-from tensordict.tensordict import TensorDictBase
 import torch
-from torchrl.data.tensor_specs import TensorSpec
+import numpy as np
 import wandb
+
 from functorch import vmap
 from omegaconf import OmegaConf
 
 from omni_drones import CONFIG_PATH, init_simulation_app
 from omni_drones.utils.torchrl import SyncDataCollector, AgentSpec
-from omni_drones.utils.envs.transforms import (
-    DepthImageNorm,
+from omni_drones.utils.torchrl.transforms import (
     LogOnEpisode, 
     FromMultiDiscreteAction, 
     FromDiscreteAction,
-    flatten_composite,
-    VelController,
+    ravel_composite,
     History
 )
 from omni_drones.utils.wandb import init_wandb
@@ -30,22 +28,22 @@ from omni_drones.learning import (
     SACPolicy,
     TD3Policy,
     MATD3Policy,
-    DreamerPolicy,
-    TDMPCPolicy
+    TDMPCPolicy,
+    Policy,
+    PPOPolicy,
+    PPOAdaptivePolicy, PPORNNPolicy
 )
 
 from setproctitle import setproctitle
-from tensordict import TensorDict
 from torchrl.envs.transforms import (
     TransformedEnv, 
     InitTracker, 
     Compose,
-    CatTensors,
-    StepCounter,
 )
 
 from tqdm import tqdm
 
+# Class for applying a function every specific steps
 class Every:
     def __init__(self, func, steps):
         self.func = func
@@ -57,19 +55,66 @@ class Every:
             self.func(*args, **kwargs)
         self.i += 1
 
+from typing import Sequence
+from tensordict import TensorDictBase
+
+# Class for storing statistics for every iteration
+class EpisodeStats:
+    def __init__(self, in_keys: Sequence[str] = None):
+        self.in_keys = in_keys
+        self._stats = []
+        self._episodes = 0
+
+    # when called, store new values into internal data
+    def __call__(self, tensordict: TensorDictBase) -> TensorDictBase:
+        done = tensordict.get(("next", "done"))
+        truncated = tensordict.get(("next", "truncated"), None)
+        done_or_truncated = (
+            (done | truncated) if truncated is not None else done.clone()
+        )
+        if done_or_truncated.any():
+            done_or_truncated = done_or_truncated.squeeze(-1) # [env_num, 1, 1]
+            self._episodes += done_or_truncated.sum().item()
+            self._stats.extend(
+                # [env, n, 1]
+                tensordict.select(*self.in_keys)[:, 1:][done_or_truncated[:, :-1]].clone().unbind(0)
+            )
+    
+    # pop all the data out and clear internal data
+    def pop(self):
+        stats: TensorDictBase = torch.stack(self._stats).to_tensordict()
+        self._stats.clear()
+        return stats
+
+    def __len__(self):
+        return len(self._stats)
+
+# import config file
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
 def main(cfg):
+    # seed
+    # cfg.seed = int(time.time())%10000
+    torch.manual_seed(cfg.seed)
+    torch.cuda.manual_seed_all(cfg.seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    np.random.seed(cfg.seed)
+    
+    # read config and init modules
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
-    run = init_wandb(cfg)
     simulation_app = init_simulation_app(cfg)
+    run = init_wandb(cfg)
     setproctitle(run.name)
     print(OmegaConf.to_yaml(cfg))
-
+    
+    # link RL algorithms
     from omni_drones.envs.isaac_env import IsaacEnv
-    from omni_drones.sensors.camera import Camera, PinholeCameraCfg
     algos = {
+        "ppo": PPOPolicy,
+        "ppo_adaptive": PPOAdaptivePolicy,
+        "ppo_rnn": PPORNNPolicy,
         "mappo": MAPPOPolicy, 
         "happo": HAPPOPolicy,
         "qmix": QMIXPolicy,
@@ -77,144 +122,239 @@ def main(cfg):
         "sac": SACPolicy,
         "td3": TD3Policy,
         "matd3": MATD3Policy,
-        "dreamer": DreamerPolicy,
-        "tdmpc": TDMPCPolicy
+        "tdmpc": TDMPCPolicy,
+        "test": Policy
     }
 
+    # init customize env class
     env_class = IsaacEnv.REGISTRY[cfg.task.name]
     base_env = env_class(cfg, headless=cfg.headless)
-    
-    def log(info):
-        print(OmegaConf.to_yaml(info))
-        # run.log(info)
 
-    stats_keys = [
-        k for k in base_env.observation_spec.keys(True, True) 
-        if isinstance(k, tuple) and k[0]=="stats"
-    ]
-    logger = LogOnEpisode(
-        cfg.env.num_envs,
-        in_keys=["return", "return", "progress", *stats_keys],
-        log_keys=["return", "return_std", "ep_length", *stats_keys],
-        logger_func=log,
-        process_func={"return_std": lambda x: torch.std(x).item()}
-    )
-    transforms = [InitTracker(), logger]
+    # init tranforms applied to the original env
+    transforms = [InitTracker()]
 
-    # a CompositeSpec is by deafault processed by a entity-based encoder
+    # transform for observations (output of env)
+    # a CompositeSpec is by default processed by a entity-based encoder
     # flatten it to use a MLP encoder instead
     if cfg.task.get("flatten_obs", False):
-        transforms.append(flatten_composite(base_env.observation_spec, "drone.obs"))
+        transforms.append(ravel_composite(base_env.observation_spec, ("agents", "observation")))
     if cfg.task.get("flatten_state", False):
-        transforms.append(flatten_composite(base_env.observation_spec, "drone.state"))
-    if cfg.task.get("visual_obs", False):
-        min_depth = cfg.task.camera.get("min_depth", 0.1)
-        max_depth = cfg.task.camera.get("max_depth", 5)
-        transforms.append(
-            DepthImageNorm([("drone.obs", "distance_to_camera")], 
-                            min_range=min_depth, max_range=max_depth)
-        )
+        transforms.append(ravel_composite(base_env.observation_spec, ("agents", "state")))
+    if (
+        cfg.task.get("flatten_intrinsics", True)
+        and ("agents", "intrinsics") in base_env.observation_spec.keys(True)
+    ):
+        transforms.append(ravel_composite(base_env.observation_spec, ("agents", "intrinsics"), start_dim=-1))
+
+    if cfg.task.get("history", False):
+        transforms.append(History([("agents", "observation")]))
     
+    # transform for actions (input of env)
     # optionally discretize the action space or use a controller
     action_transform: str = cfg.task.get("action_transform", None)
     if action_transform is not None:
         if action_transform.startswith("multidiscrete"):
             nbins = int(action_transform.split(":")[1])
-            transform = FromMultiDiscreteAction(("action", "drone.action"), nbins=nbins)
+            transform = FromMultiDiscreteAction(nbins=nbins)
             transforms.append(transform)
         elif action_transform.startswith("discrete"):
             nbins = int(action_transform.split(":")[1])
-            transform = FromDiscreteAction(("action", "drone.action"), nbins=nbins)
+            transform = FromDiscreteAction(nbins=nbins)
             transforms.append(transform)
-        elif action_transform == "controller":
-            controller_cls = base_env.drone.DEFAULT_CONTROLLER
-            print(f"Use controller {controller_cls}")
-            controller = controller_cls(
-                base_env.dt, 
-                9.81, 
-                base_env.drone.params
-            ).to(base_env.device)
-            transform = VelController(vmap(vmap(controller)), ("action", "drone.action"))
+        elif action_transform == "velocity":
+            from omni_drones.controllers import LeePositionController
+            from omni_drones.utils.torchrl.transforms import VelController
+            controller = LeePositionController(9.81, base_env.drone.params).to(base_env.device)
+            transform = VelController(controller)
+            transforms.append(transform)
+        elif action_transform == "attitude":
+            from omni_drones.controllers import AttitudeController as Controller
+            from omni_drones.utils.torchrl.transforms import AttitudeController
+            controller = Controller(9.81, base_env.drone.params).to(base_env.device)
+            transform = AttitudeController(controller)
+            transforms.append(transform)
+        elif action_transform == "rate":
+            from omni_drones.controllers import RateController as _RateController
+            from omni_drones.utils.torchrl.transforms import RateController
+            controller = _RateController(9.81, base_env.drone.params).to(base_env.device)
+            transform = RateController(controller)
             transforms.append(transform)
         elif not action_transform.lower() == "none":
             raise NotImplementedError(f"Unknown action transform: {action_transform}")
     
+    # apply the transform to original env and create wrapped env
     env = TransformedEnv(base_env, Compose(*transforms)).train()
     env.set_seed(cfg.seed)
 
-    camera_cfg = PinholeCameraCfg(
-        sensor_tick=0,
-        resolution=(960, 720),
-        data_types=["rgb"],
-        usd_params=PinholeCameraCfg.UsdCameraCfg(
-            focal_length=24.0,
-            focus_distance=400.0,
-            horizontal_aperture=20.955,
-            clipping_range=(0.1, 1.0e5),
-        ),
-    )
-    
-    camera = Camera(camera_cfg)
-    camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 10.0)], targets=[(0.0, 0.0, 0.0)])
-    camera.initialize("/World/Camera")
+    # get parameters
+    agent_spec: AgentSpec = env.agent_spec["drone"]
+    policy = algos[cfg.algo.name.lower()](cfg.algo, agent_spec=agent_spec, device="cuda")
 
-    # TODO: create a agent_spec view for TransformedEnv
-    agent_spec = AgentSpec(
-        name=base_env.agent_spec["drone"].name,
-        n=base_env.agent_spec["drone"].n,
-        observation_spec=env.observation_spec["drone.obs"],
-        action_spec=env.action_spec["drone.action"],
-        reward_spec=env.reward_spec["drone.reward"],
-        state_spec=env.observation_spec["drone.state"] if base_env.agent_spec["drone"].state_spec is not None else None,
-    )
-    policy = algos[cfg.algo.name.lower()](
-        cfg.algo, agent_spec=agent_spec, device="cuda"
-    )
+    if cfg.model_dir is not None:
+        # torch.save(policy.state_dict(), ckpt_path)
+        policy.load_state_dict(torch.load(cfg.model_dir))
+        print("Successfully load model!")
 
-    # ckpt_name = "checkpoint_final.pt"
-    # ckpt = wandb.restore(ckpt_name, run.path)
-    # state_dict = torch.load(ckpt)
-    # policy.load_state_dict(state_dict)
+    frames_per_batch = env.num_envs * int(cfg.algo.train_every)
+    total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
+    max_iters = cfg.get("max_iters", -1)
+    eval_interval = cfg.get("eval_interval", -1)
+    save_interval = cfg.get("save_interval", -1)
+
+    # prepare the container to store statistics of each episode
+    stats_keys = [
+        k for k in base_env.observation_spec.keys(True, True) 
+        if isinstance(k, tuple) and k[0]=="stats"
+    ]
+    episode_stats = EpisodeStats(stats_keys)
+
+    # wrapper for env and policy
+    # used to automatically perform policy in the env 
+    collector = SyncDataCollector(
+        env,
+        policy=policy,
+        frames_per_batch=frames_per_batch,
+        total_frames=total_frames,
+        device=cfg.sim.device,
+        return_same_td=True,
+    )
 
     @torch.no_grad()
-    def evaluate(policy):
+    def evaluate(
+        seed: int=0
+    ):
+        """
+        Evaluate function called every certain steps. 
+        Used to record statistics and videos.
+        """
         frames = []
 
-        def record_frame(*args, **kwargs):
-            frame = camera.get_images()["rgb"][0]
-            frames.append(frame.cpu())
-
+        # set env to rendering and evaluation mode
         base_env.enable_render(True)
+        base_env.eval()
         env.eval()
-        env.rollout(
+        base_env.set_train = False
+        env.set_seed(seed)
+
+        from tqdm import tqdm
+        t = tqdm(total=base_env.max_episode_length)
+        
+        def record_frame(*args, **kwargs):
+            frame = env.base_env.render(mode="rgb_array")
+            frames.append(frame)
+            t.update(2)
+
+        # get one episode rollout using current policy and form a trajectory
+        trajs = env.rollout(
             max_steps=base_env.max_episode_length,
-            policy=policy,
+            policy=lambda x: policy(x, deterministic=True),
             callback=Every(record_frame, 2),
             auto_reset=True,
             break_when_any_done=False,
             return_contiguous=False
-        )
+        ).clone()
+
+        # after rollout, set rendering mode to not headless and reset env
         base_env.enable_render(not cfg.headless)
         env.reset()
-        env.train()
 
+        # get first done index of each trajectory
+        done = trajs.get(("next", "done"))
+        first_done = torch.argmax(done.long(), dim=1).cpu()
+
+        def take_first_episode(tensor: torch.Tensor):
+            indices = first_done.reshape(first_done.shape+(1,)*(tensor.ndim-2))
+            return torch.take_along_dim(tensor, indices, dim=1).reshape(-1)
+
+        traj_stats = {
+            k: take_first_episode(v)
+            for k, v in trajs[("next", "stats")].cpu().items()
+        }
+
+        info = {
+            "eval/stats." + k: torch.nanmean(v.float()).item() 
+            for k, v in traj_stats.items()
+        }
+        
+        # render video
         if len(frames):
-            video_array = torch.stack(frames)
+            # video_array = torch.stack(frames)
+            video_array = np.stack(frames).transpose(0, 3, 1, 2)
+            # from PIL import Image
+            # for idx in range(len(video_array)):
+            #     image = Image.fromarray(video_array[idx].transpose(1, 2, 0))
+            #     image.save("{}.png".format(idx))
+            #     if idx >= 200:
+            #         break
+            frames.clear()
             info["recording"] = wandb.Video(
                 video_array, fps=0.5 / cfg.sim.dt, format="mp4"
             )
-        frames.clear()
+        
         return info
 
-    checkpoint_inter = 0
-    while checkpoint_inter < 100:
-        # end_model = cfg.model_dir + '/checkpoint_{}.pt'.format(checkpoint_inter)
-        # policy.load_state_dict(torch.load(end_model))
-        # print("Successfully load model!")
+    pbar = tqdm(collector)
+    env.train() # set env into training mode
+    base_env.set_train = True
+    fps = []
+    
+    # # eval for 1 times
+    # info = {}
+    # info.update(evaluate())
+    # run.log(info)
+    # breakpoint()
+    
+    # for each iteration, the collector perform one step in the env
+    # and get the result rollout as data
+    for i, data in enumerate(pbar):
+        # fps.append(collector._fps)
+        info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
 
-        info = evaluate(policy)
-        print(info)
-        checkpoint_inter += 1
+        # store rollout data into the container
+        episode_stats(data.to_tensordict())
+
+        # if episode_stats is full (as long as the number of envs)
+        # transfer all the statistics into info and clear the container
+        if len(episode_stats) >= base_env.num_envs:
+            stats = {
+                "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v).item() 
+                for k, v in episode_stats.pop().items(True, True)
+            }
+            info.update(stats)
+        
+        # update the policy using rollout data and store the training statistics
+        # info.update(policy.train_op(data.to_tensordict()))
+
+        # evaluate every certain step
+        logging.info(f"Eval at {collector._frames} steps.")
+        info.update(evaluate())
+
+        # log infos into wandb run
+        run.log(info)
+        print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
+
+        pbar.set_postfix({
+            "rollout_fps": collector._fps,
+            "frames": collector._frames,
+        })
+
+        if max_iters > 0 and i >= max_iters - 1:
+            break 
+    
+    # final evaluation after training
+    logging.info(f"Final Eval at {collector._frames} steps.")
+    info = {"env_frames": collector._frames}
+    info.update(evaluate())
+    run.log(info)
+
+    # final save
+    if hasattr(policy, "state_dict"):
+        ckpt_path = os.path.join(run.dir, "checkpoint_final.pt")
+        logging.info(f"Save checkpoint to {str(ckpt_path)}")
+        torch.save(policy.state_dict(), ckpt_path)
+
+    wandb.save(os.path.join(run.dir, "checkpoint*"))
+    wandb.finish()
     
     simulation_app.close()
 

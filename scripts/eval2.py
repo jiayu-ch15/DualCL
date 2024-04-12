@@ -45,7 +45,6 @@ from torchrl.envs.transforms import (
 )
 
 from tqdm import tqdm
-from PIL import Image
 
 class Every:
     def __init__(self, func, steps):
@@ -156,7 +155,7 @@ def main(cfg):
     )
     
     camera = Camera(camera_cfg)
-    camera.spawn(["/World/Camera"], translations=[(1.0, 1.0, 5.0)], targets=[(0.0, 0.0, 0.0)])
+    camera.spawn(["/World/Camera"], translations=[(5.0, 5.0, 10.0)], targets=[(0.0, 0.0, 0.0)])
     camera.initialize("/World/Camera")
 
     # TODO: create a agent_spec view for TransformedEnv
@@ -172,6 +171,11 @@ def main(cfg):
         cfg.algo, agent_spec=agent_spec, device="cuda"
     )
 
+    # ckpt_name = "checkpoint_final.pt"
+    # ckpt = wandb.restore(ckpt_name, run.path)
+    # state_dict = torch.load(ckpt)
+    # policy.load_state_dict(state_dict)
+
     @torch.no_grad()
     def evaluate(policy):
         frames = []
@@ -182,71 +186,38 @@ def main(cfg):
 
         base_env.enable_render(True)
         env.eval()
-        base_env.set_train = False
-        eval_info = env.rollout(
+        env.rollout(
             max_steps=base_env.max_episode_length,
             policy=policy,
             callback=Every(record_frame, 2),
             auto_reset=True,
             break_when_any_done=False,
             return_contiguous=False
-        )['info']
+        )
         base_env.enable_render(not cfg.headless)
         env.reset()
         env.train()
-        base_env.set_train = True
 
         if len(frames):
             video_array = torch.stack(frames)
             info["recording"] = wandb.Video(
                 video_array, fps=0.5 / cfg.sim.dt, format="mp4"
             )
-        for idx, frame in enumerate(frames):
-            image = Image.fromarray(frame.cpu().numpy().swapaxes(0, 2).swapaxes(0, 1))
-            image.save("frame_{}.png".format(idx))
         frames.clear()
-        info['capture'] = eval_info['capture'][:,-1].mean()
-        info['capture_per_step'] = eval_info['capture_per_step'][:,-1].mean()
-        info['cover_rate'] = eval_info['cover_rate'][:,-1].mean()
         return info
 
     checkpoint_inter = 0
-    info = {}
-    
-    if cfg.only_eval_final:
-        path = cfg.model_dir
-        # get all files and folders under path
-        files_and_folders = os.listdir(path)
+    while checkpoint_inter < 100:
+        # end_model = cfg.model_dir + '/checkpoint_{}.pt'.format(checkpoint_inter)
+        # policy.load_state_dict(torch.load(end_model))
+        # print("Successfully load model!")
 
-        # get file which start with '/checkpoint_{}_.pt'
-        for file_one in files_and_folders:
-            if file_one.startswith('checkpoint_{}_'.format(cfg.end_checkpoint)):
-                end_model = os.path.join(path, file_one)
-                break
-        policy.load_state_dict(torch.load(end_model))
-        print("Successfully load model!")
-        info.update(evaluate(policy))
-        print('info', info)
-        wandb.log(info, step=checkpoint_inter)
-    else:
-        while checkpoint_inter < cfg.end_checkpoint:
-            path = cfg.model_dir
-            # get all files and folders under path
-            files_and_folders = os.listdir(path)
-
-            # get file which start with '/checkpoint_{}_.pt'
-            # a_files = [os.path.join(path, file_one) for file_one in files_and_folders if file_one.startswith('/checkpoint_{}_'.format(checkpoint_inter)) and os.path.isfile(os.path.join(path, file_one))]
-            for file_one in files_and_folders:
-                if file_one.startswith('checkpoint_{}_'.format(checkpoint_inter)):
-                    end_model = os.path.join(path, file_one)
-                    break
-            policy.load_state_dict(torch.load(end_model))
-            print("Successfully load model!")
-            info.update(evaluate(policy))
-            wandb.log(info, step=checkpoint_inter)
-            checkpoint_inter += cfg.save_interval
+        info = evaluate(policy)
+        print(info)
+        checkpoint_inter += 1
     
     simulation_app.close()
+
 
 if __name__ == "__main__":
     main()
