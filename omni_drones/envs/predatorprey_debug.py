@@ -799,20 +799,22 @@ class PredatorPrey_debug(IsaacEnv):
         force_r[..., :2] = - self._norm(drone_pos[..., :2]) / (torch.relu(self.arena_size - drone_origin_dist) + 1e-9).unsqueeze(-1)
         force_r[..., 2] = 1 / (torch.relu(drone_pos[...,2] - 0) + 1e-9) - 1 / (torch.relu(self.max_height - drone_pos[..., 2]) + 1e-9)
         policy += force_r
+
+        policy = force_r
         
         # controller函数变了，需要重写
         
         # policy[..., 0] = 0
         # policy[..., 1] = 0
-        # policy[..., 2] = 10
-        control_target = self._ctrl_target(policy, self.dt)
+        # policy[..., 2] = force_r[..., 2]
+        # control_target = self._ctrl_target(policy, self.dt)
         
         root_state = self.drone.get_state()[..., :13].squeeze(0)
         
         cmds = self.controller(root_state, target_vel=policy)
         # cmds = self.controller(root_state, control_target)
 
-        # cmds = cmds * 0 + 100
+        # cmds = cmds * 0 + 10
 
         torch.nan_to_num_(cmds, 0.)
         actions = cmds
