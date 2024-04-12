@@ -1,26 +1,3 @@
-# MIT License
-# 
-# Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -30,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tensordict import TensorDict
 from tensordict.utils import expand_right
-from tensordict.nn import make_functional, TensorDictModule, TensorDictParams
+from tensordict.nn import make_functional, TensorDictModule
 from torch.optim import lr_scheduler
 
 from torchrl.data import (
@@ -42,13 +19,12 @@ from torchrl.data import (
     UnboundedContinuousTensorSpec as UnboundedTensorSpec,
 )
 
-from omni_drones.utils.torchrl.env import AgentSpec
+from omni_drones.utils.torchrl import AgentSpec
 
 from .utils import valuenorm
 from .utils.gae import compute_gae
 
 LR_SCHEDULER = lr_scheduler._LRScheduler
-from torchrl.modules import TanhNormal, IndependentNormal
 
 
 class MAPPOPolicy(object):
@@ -82,9 +58,10 @@ class MAPPOPolicy(object):
                 self.agent_spec.reward_spec.shape, device=device
             )
 
-        self.obs_name = ("agents", "observation")
-        self.act_name = ("agents", "action")
-        self.reward_name = ("agents", "reward")
+        self.obs_name = f"{self.agent_spec.name}.obs"
+        self.act_name = ("action", f"{self.agent_spec.name}.action")
+        self.state_name = f"{self.agent_spec.name}.state"
+        self.reward_name = f"{self.agent_spec.name}.reward"
 
         self.make_actor()
         self.make_critic()
@@ -139,14 +116,11 @@ class MAPPOPolicy(object):
 
         if self.cfg.share_actor:
             self.actor = create_actor_fn()
-            self.actor_params = TensorDictParams(make_functional(self.actor))
+            self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=cfg.lr)
         else:
             actors = nn.ModuleList([create_actor_fn() for _ in range(self.agent_spec.n)])
             self.actor = actors[0]
-            stacked_params = torch.stack([make_functional(actor) for actor in actors])
-            self.actor_params = TensorDictParams(stacked_params.to_tensordict())
-        
-        self.actor_opt = torch.optim.Adam(self.actor_params.parameters(), lr=cfg.lr)
+            self.actor_opt = torch.optim.Adam(actors.parameters(), lr=cfg.lr)
 
     def make_critic(self):
         cfg = self.cfg.critic
@@ -158,7 +132,7 @@ class MAPPOPolicy(object):
 
         assert self.cfg.critic_input in ("state", "obs")
         if self.cfg.critic_input == "state" and self.agent_spec.state_spec is not None:
-            self.critic_in_keys = [("agents", "state")]
+            self.critic_in_keys = [f"{self.agent_spec.name}.state"]
             self.critic_out_keys = ["state_value"]
             if cfg.get("rnn", None):
                 self.critic_in_keys.extend([
@@ -175,7 +149,7 @@ class MAPPOPolicy(object):
             ).to(self.device)
             self.value_func = self.critic
         else:
-            self.critic_in_keys = [self.obs_name]
+            self.critic_in_keys = [f"{self.agent_spec.name}.obs"]
             self.critic_out_keys = ["state_value"]
             if cfg.get("rnn", None):
                 self.critic_in_keys.extend([
@@ -208,8 +182,7 @@ class MAPPOPolicy(object):
             # Empirically the performance is similar on most of the tasks.
             cls = getattr(valuenorm, cfg.value_norm["class"])
             self.value_normalizer: valuenorm.Normalizer = cls(
-                # input_shape=self.agent_spec.reward_spec.shape[-2:],
-                input_shape=self.agent_spec.reward_spec.shape[-1:],
+                input_shape=self.agent_spec.reward_spec.shape[-2:],
                 **cfg.value_norm["kwargs"],
             ).to(self.device)
 
@@ -232,15 +205,13 @@ class MAPPOPolicy(object):
             actor_input["is_init"] = expand_right(
             actor_input["is_init"], (*actor_input.batch_size, self.agent_spec.n)
         )
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n] # [env_num, drone_num]
-        if self.cfg.share_actor:
-            actor_output = self.actor(actor_input, self.actor_params, deterministic=deterministic)
-        else:
-            actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1, randomness="different")(
-                actor_input, self.actor_params, deterministic=deterministic
-            )
+        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
+        actor_output = vmap(self.actor, in_dims=1, out_dims=1, randomness="different")(
+            actor_input, deterministic=deterministic
+        )
 
         tensordict.update(actor_output)
+        tensordict["action"].batch_size = tensordict.shape
         tensordict.update(self.value_op(tensordict))
         return tensordict
 
@@ -255,21 +226,19 @@ class MAPPOPolicy(object):
 
         log_probs_old = batch[self.act_logps_name]
         if hasattr(self, "minibatch_seq_len"): # [N, T, A, *]
-            actor_output = vmap(self.actor, in_dims=(2, 0), out_dims=2)(
-                actor_input, self.actor_params, eval_action=True
-            )
+            pass
+            # actor_output = vmap(self.actor, in_dims=(2, 0), out_dims=2)(
+            #     actor_input, self.actor_params, eval_action=True
+            # )
         else: # [N, A, *]
-            if self.cfg.share_actor:
-                actor_output = self.actor(actor_input, self.actor_params, eval_action=True)
-            else:
-                actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1)(
-                    actor_input, self.actor_params, eval_action=True
-                )
+            actor_output = vmap(self.actor, in_dims=0, out_dims=0, randomness="different")(
+                actor_input, eval_action=True
+            )
 
         log_probs_new = actor_output[self.act_logps_name]
-        if not self.cfg.actor.tanh:
-            dist_entropy = actor_output[f"{self.agent_spec.name}.action_entropy"]
-            assert advantages.shape == log_probs_new.shape == dist_entropy.shape
+        dist_entropy = actor_output[f"{self.agent_spec.name}.action_entropy"]
+
+        assert advantages.shape == log_probs_new.shape == dist_entropy.shape
 
         ratio = torch.exp(log_probs_new - log_probs_old)
         surr1 = ratio * advantages
@@ -278,17 +247,13 @@ class MAPPOPolicy(object):
             * advantages
         )
         policy_loss = - torch.mean(torch.min(surr1, surr2) * self.act_dim)
-        if not self.cfg.actor.tanh:
-            entropy_loss = - torch.mean(dist_entropy)
-        else:
-            entropy_loss = - torch.mean(-log_probs_new)
+        entropy_loss = - torch.mean(dist_entropy)
 
         self.actor_opt.zero_grad()
-        (policy_loss + entropy_loss * self.cfg.entropy_coef).backward()
+        (policy_loss - entropy_loss * self.cfg.entropy_coef).backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.actor_opt.param_groups[0]["params"], self.cfg.max_grad_norm
         )
-        
         self.actor_opt.step()
 
         ess = (2 * ratio.logsumexp(0) - (2 * ratio).logsumexp(0)).exp().mean() / ratio.shape[0]
@@ -342,7 +307,7 @@ class MAPPOPolicy(object):
         with torch.no_grad():
             value_output = self.value_op(next_tensordict)
 
-        rewards = tensordict.get(("next", *self.reward_name))
+        rewards = tensordict.get(("next", "reward", f"{self.agent_spec.name}.reward"))
         if rewards.shape[-1] != 1:
             rewards = rewards.sum(-1, keepdim=True)
 
@@ -409,14 +374,13 @@ class MAPPOPolicy(object):
     def state_dict(self):
         state_dict = {
             "critic": self.critic.state_dict(),
-            "actor_params": self.actor_params,
+            "actor": self.actor.state_dict(),
             "value_normalizer": self.value_normalizer.state_dict()
         }
         return state_dict
     
     def load_state_dict(self, state_dict):
-        self.actor_params = TensorDictParams(state_dict["actor_params"].to_tensordict())
-        self.actor_opt = torch.optim.Adam(self.actor_params.parameters(), lr=self.cfg.actor.lr)
+        self.actor.load_state_dict(state_dict["actor"])
         self.critic.load_state_dict(state_dict["critic"])
         self.value_normalizer.load_state_dict(state_dict["value_normalizer"])
 
@@ -446,8 +410,12 @@ def make_dataset_naive(
 
 from .modules.distributions import (
     DiagGaussian,
+    IndependentNormalModule,
     MultiCategoricalModule,
-    TanhIndependentNormalModule
+)
+
+from .utils.network import (
+    SplitEmbedding,
 )
 
 from .modules.rnn import GRU
@@ -465,11 +433,8 @@ def make_ppo_actor(cfg, observation_spec: TensorSpec, action_spec: TensorSpec):
         act_dist = MultiCategoricalModule(encoder.output_shape.numel(), [action_spec.space.n])
     elif isinstance(action_spec, (UnboundedTensorSpec, BoundedTensorSpec)):
         action_dim = action_spec.shape[-1]
-        if cfg.tanh:
-            act_dist = TanhIndependentNormalModule(encoder.output_shape.numel(), action_dim)
-        else:
-            act_dist = DiagGaussian(encoder.output_shape.numel(), action_dim, False, 0.01)
-    #     # act_dist = IndependentNormalModule(encoder.output_shape.numel(), action_dim, False)
+        act_dist = DiagGaussian(encoder.output_shape.numel(), action_dim, False, 0.01)
+        # act_dist = IndependentNormalModule(encoder.output_shape.numel(), action_dim, False)
     else:
         raise NotImplementedError(action_spec)
 
@@ -483,7 +448,6 @@ def make_ppo_actor(cfg, observation_spec: TensorSpec, action_spec: TensorSpec):
 
 
 def make_critic(cfg, state_spec: TensorSpec, reward_spec: TensorSpec, centralized=False):
-    assert isinstance(reward_spec, (UnboundedTensorSpec, BoundedTensorSpec))
     encoder = make_encoder(cfg, state_spec)
     
     if cfg.get("rnn", None):
@@ -532,9 +496,7 @@ class Actor(nn.Module):
 
         if eval_action:
             action_log_probs = action_dist.log_prob(action).unsqueeze(-1)
-            dist_entropy = action_dist.entropy()
-            if dist_entropy is not None: 
-                dist_entropy = dist_entropy.unsqueeze(-1)
+            dist_entropy = action_dist.entropy().unsqueeze(-1)
             return action, action_log_probs, dist_entropy, None
         else:
             action = action_dist.mode if deterministic else action_dist.sample()
@@ -575,3 +537,45 @@ class Critic(nn.Module):
         return values, rnn_state
 
 
+INDEX_TYPE = Union[int, slice, torch.LongTensor, List[int]]
+
+
+class CentralizedCritic(nn.Module):
+    """Critic for centralized training.
+
+    Args:
+        entity_ids: indices of the entities that are considered as agents.
+
+    """
+
+    def __init__(
+        self,
+        cfg,
+        entity_ids: INDEX_TYPE,
+        state_spec: CompositeSpec,
+        reward_spec: TensorSpec,
+        embed_dim=128,
+        nhead=1,
+        num_layers=1,
+    ):
+        super().__init__()
+        self.entity_ids = entity_ids
+        self.embed = SplitEmbedding(state_spec, embed_dim=embed_dim)
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer=nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=nhead,
+                dim_feedforward=embed_dim,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=num_layers,
+        )
+        self.output_shape = reward_spec.shape
+        self.v_out = nn.Linear(embed_dim, self.output_shape.shape.numel())
+
+    def forward(self, x: torch.Tensor):
+        x = self.embed(x)
+        x = self.encoder(x)
+        values = self.v_out(x[..., self.entity_ids, :]).unflatten(-1, self.output_shape)
+        return values

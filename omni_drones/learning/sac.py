@@ -1,3 +1,26 @@
+# MIT License
+# 
+# Copyright (c) 2023 Botian Xu, Tsinghua University
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,13 +60,16 @@ class SACPolicy(object):
         self.buffer_size = int(cfg.buffer_size)
         self.batch_size = int(cfg.batch_size)
 
-        self.obs_name = f"{self.agent_spec.name}.obs"
-        self.act_name = ("action", f"{self.agent_spec.name}.action")
-        if agent_spec.state_spec is not None:
-            self.state_name = f"{self.agent_spec.name}.state"
-        else:
-            self.state_name = f"{self.agent_spec.name}.obs"
-        self.reward_name = f"{self.agent_spec.name}.reward"
+        # self.obs_name = f"{self.agent_spec.name}.obs"
+        # self.act_name = ("action", f"{self.agent_spec.name}.action")
+        # if agent_spec.state_spec is not None:
+        #     self.state_name = f"{self.agent_spec.name}.state"
+        # else:
+        #     self.state_name = f"{self.agent_spec.name}.obs"
+        # self.reward_name = f"{self.agent_spec.name}.reward"
+        self.obs_name = ("agents", "observation")
+        self.act_name = ("agents", "action")
+        self.reward_name = ("agents", "reward")
 
         self.make_actor()
         self.make_critic()
@@ -86,6 +112,7 @@ class SACPolicy(object):
 
             self.critic = Critic(
                 self.cfg.critic, 
+                1,
                 self.agent_spec.state_spec,
                 self.agent_spec.action_spec
             ).to(self.device)
@@ -95,7 +122,7 @@ class SACPolicy(object):
 
             self.critic = Critic(
                 self.cfg.critic, 
-                self.agent_spec.n,
+                1,
                 self.agent_spec.observation_spec,
                 self.agent_spec.action_spec
             ).to(self.device)
@@ -105,10 +132,11 @@ class SACPolicy(object):
         self.critic_loss_fn = {"mse": F.mse_loss, "smooth_l1": F.smooth_l1_loss}[self.cfg.critic_loss]
 
     def __call__(self, tensordict: TensorDict, deterministic: bool=False) -> TensorDict:
+        return tensordict.update({self.act_name: self.agent_spec.action_spec.zero()})
         actor_input = tensordict.select(*self.policy_in_keys)
         actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
         actor_output = self.actor(actor_input)
-        actor_output["action"].batch_size = tensordict.batch_size
+        # actor_output["action"].batch_size = tensordict.batch_size
         tensordict.update(actor_output)
         return tensordict
 

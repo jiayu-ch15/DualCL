@@ -1,26 +1,3 @@
-# MIT License
-# 
-# Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -76,7 +53,7 @@ class MATD3Policy(object):
 
         self.replay_buffer = TensorDictReplayBuffer(
             batch_size=self.batch_size,
-            storage=LazyTensorStorage(max_size=self.buffer_size, device="cpu"),
+            storage=LazyTensorStorage(max_size=self.buffer_size, device=self.device),
             sampler=RandomSampler(),
         )
     
@@ -155,7 +132,7 @@ class MATD3Policy(object):
         return actor_output
 
     def train_op(self, data: TensorDict):
-        self.replay_buffer.extend(data.to("cpu").reshape(-1))
+        self.replay_buffer.extend(data.reshape(-1))
 
         if len(self.replay_buffer) < self.cfg.buffer_size:
             print(f"{len(self.replay_buffer)} < {self.cfg.buffer_size}")
@@ -167,7 +144,7 @@ class MATD3Policy(object):
         with tqdm(range(1, self.gradient_steps+1)) as t:
             for gradient_step in t:
 
-                transition = self.replay_buffer.sample(self.batch_size).to(self.device)
+                transition = self.replay_buffer.sample(self.batch_size)
 
                 state   = transition[self.state_name]
                 actions_taken = transition[self.act_name]
@@ -250,7 +227,7 @@ def soft_update_td(target_params: TensorDict, params: TensorDict, tau: float):
     for target_param, param in zip(target_params.values(True, True), params.values(True, True)):
         target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-from .modules.networks import MLP, ENCODERS_MAP
+from .modules.networks import MLP
 from .common import make_encoder
 
 
@@ -266,7 +243,7 @@ class Critic(nn.Module):
         self.cfg = cfg
         self.num_agents = num_agents
         self.act_space = action_spec
-        self.state_spec = state_spec
+        self.state_space = state_spec
         self.num_critics = num_critics
 
         self.critics = nn.ModuleList([
@@ -274,17 +251,14 @@ class Critic(nn.Module):
         ])
 
     def _make_critic(self):
-        if isinstance(self.state_spec, (BoundedTensorSpec, UnboundedTensorSpec)):
+        if isinstance(self.state_space, (BoundedTensorSpec, UnboundedTensorSpec)):
             action_dim = self.act_space.shape[-1]
-            state_dim = self.state_spec.shape[-1]
+            state_dim = self.state_space.shape[-1]
             num_units = [
                 action_dim * self.num_agents + state_dim, 
                 *self.cfg["hidden_units"]
             ]
             base = MLP(num_units)
-        elif isinstance(self.state_spec, CompositeSpec):
-            encoder_cls = ENCODERS_MAP[self.cfg.attn_encoder]
-            base = encoder_cls(CompositeSpec(self.state_spec))
         else:
             raise NotImplementedError
         

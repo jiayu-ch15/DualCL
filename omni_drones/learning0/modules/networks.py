@@ -1,26 +1,3 @@
-# MIT License
-# 
-# Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 from functools import partial
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -135,7 +112,7 @@ class SplitEmbedding(nn.Module):
             raise ValueError("Nesting is not supported.")
         self.input_spec = input_spec
         self.embed_dim = embed_dim
-        # self.num_entities = sum(spec.shape[-2] for spec in self.input_spec.values())
+        self.num_entities = sum(spec.shape[-2] for spec in self.input_spec.values())
 
         if embed_type == "linear":
             self.embed = nn.ModuleDict(
@@ -155,7 +132,6 @@ class SplitEmbedding(nn.Module):
 
     def forward(self, tensordict: TensorDict):
         embeddings = torch.cat(
-            # [self.embed[key](torch.nan_to_num(tensordict[key], nan=0.0)) for key in self.input_spec.keys()], dim=-2
             [self.embed[key](tensordict[key]) for key in self.input_spec.keys()], dim=-2
         )
         if hasattr(self, "layer_norm"):
@@ -286,34 +262,19 @@ class PartialAttentionEncoder(nn.Module):
             x: (batch, N, dim)
             padding_mask: (batch, N)
         """
-        # breakpoint()
-        # get_mask = lambda key: torch.isnan(x[key]).any(-1) # (num_batch, num_drone, num_entity)
-        # mask = torch.cat(
-        #     [get_mask(key) for key in self.split_embed.input_spec.keys()], dim=-1
-        # )
-
-        x = self.split_embed(x) # (num_batch, num_drone, num_entity, embed_dim)
-        original_shape = x.shape[:-2]
-        x = x.reshape(-1, x.shape[-2], x.shape[-1]) # (num_batch * num_drone, num_entity, embed_dim)
-        # mask = mask.reshape(-1, mask.shape[-1]) # (num_batch * num_drone, num_entity)
-        # if key_padding_mask is None:
-        #     key_padding_mask = mask
-            # key_padding_mask = torch.isnan(x).any(-1) # (num_batch * num_drone, num_entity)
-            # x = torch.nan_to_num(x, nan=0.0)
-        
+        x = self.split_embed(x)
         if self.norm_first:
             x = x[:, self.query_index] + self._pa_block(self.norm1(x), key_padding_mask)
             x = x + self._ff_block(self.norm2(x))
         else:
             x = self.norm1(x[:, self.query_index] + self._pa_block(x, key_padding_mask))
             x = self.norm2(x + self._ff_block(x))
-        # x: (num_batch * num_drone, 1, embed_dim)
-        return x.reshape(*original_shape, -1) # (num_batch, num_drone, embed_dim)
+
+        return x.mean(-2)
 
     def _pa_block(self, x: Tensor, key_padding_mask: Optional[Tensor] = None):
-        # breakpoint()
         x = self.attn(
-            x[:, self.query_index], # (num_batch * num_drone, 1, embed_dim)
+            x[:, self.query_index],
             x,
             x,
             key_padding_mask=key_padding_mask,
