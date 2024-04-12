@@ -789,7 +789,7 @@ class PredatorPrey_debug(IsaacEnv):
         # rule-based
         # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
         # policy = self.Ange(chase=3, rf=0.4, align=0.1, repel=0.3)
-        policy = self.APF(lamb=0.4)
+        policy = self.APF(lamb=0.6)
         
         # cylinders
         policy += self.obs_repel()
