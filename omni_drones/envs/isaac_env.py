@@ -1,3 +1,26 @@
+# MIT License
+# 
+# Copyright (c) 2023 Botian Xu, Tsinghua University
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
 import abc
 
 from typing import Dict, List, Optional, Tuple, Type, Union, Callable
@@ -6,6 +29,7 @@ import omni.usd
 import torch
 import logging
 import carb
+import numpy as np
 from omni.isaac.cloner import GridCloner
 from omni.isaac.core.simulation_context import SimulationContext
 from omni.isaac.core.utils import prims as prim_utils, stage as stage_utils
@@ -17,7 +41,6 @@ from torchrl.data import CompositeSpec, TensorSpec, DiscreteTensorSpec
 from torchrl.envs import EnvBase
 
 from omni_drones.robots.robot import RobotBase
-from omni_drones.sensors.camera import PinholeCameraCfg
 from omni_drones.utils.torchrl import AgentSpec
 
 
@@ -35,10 +58,11 @@ class IsaacEnv(EnvBase):
         # store inputs to class
         self.cfg = cfg
         self.enable_render(not headless)
+        self.enable_viewport = True
         # extract commonly used parameters
         self.num_envs = self.cfg.env.num_envs
         self.max_episode_length = self.cfg.env.max_episode_length
-        self.min_episode_length = self.cfg.env.min_episode_length
+        self.substeps = self.cfg.sim.substeps
 
         torch.backends.cudnn.benchmark = True
         torch.backends.cudnn.deterministic = False
@@ -54,23 +78,22 @@ class IsaacEnv(EnvBase):
             if "physx" in sim_params:
                 physx_params = sim_params.pop("physx")
                 sim_params.update(physx_params)
-
+        # set flags for simulator
+        self._configure_simulation_flags(sim_params)
         self.sim = SimulationContext(
             stage_units_in_meters=1.0,
             physics_dt=self.cfg.sim.dt,
-            rendering_dt=self.cfg.sim.dt * self.cfg.sim.substeps,
+            rendering_dt=self.cfg.sim.dt, # * self.cfg.sim.substeps,
             backend="torch",
             sim_params=sim_params,
-            # physics_prim_path="/physicsScene",
+            physics_prim_path="/physicsScene",
             device="cuda:0",
         )
+        self._create_viewport_render_product()
         self.dt = self.sim.get_physics_dt()
-        # set flags for simulator
-        self._configure_simulation_flags(sim_params)
         # add flag for checking closing status
         self._is_closed = False
         # set camera view
-        set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
         # create cloner for duplicating the scenes
         cloner = GridCloner(spacing=self.cfg.env.env_spacing)
         cloner.define_base_env("/World/envs")
@@ -98,6 +121,11 @@ class IsaacEnv(EnvBase):
         )
         # find the environment closest to the origin for visualization
         self.central_env_idx = self.envs_positions.norm(dim=-1).argmin()
+        central_env_pos = self.envs_positions[self.central_env_idx].cpu().numpy()
+        set_camera_view(
+            eye=central_env_pos + np.asarray(self.cfg.viewer.eye), 
+            target=central_env_pos + np.asarray(self.cfg.viewer.lookat)
+        )
         
         RobotBase._envs_positions = self.envs_positions.unsqueeze(1)
 
@@ -118,12 +146,10 @@ class IsaacEnv(EnvBase):
             self.batch_size,
         )
         self.progress_buf = self._tensordict["progress"]
-        self.observation_spec = CompositeSpec(shape=self.batch_size)
-        self.action_spec = CompositeSpec(shape=self.batch_size)
-        self.reward_spec = CompositeSpec(shape=self.batch_size)
-        self.done_spec = DiscreteTensorSpec(
-            n=2, shape=(*self.batch_size, 1), dtype=torch.bool, device=self.device
-        )
+        self._set_specs()
+        import pprint
+        pprint.pprint(self.fake_tensordict().shapes)
+        
 
     @classmethod
     def __init_subclass__(cls, **kwargs):
@@ -139,12 +165,17 @@ class IsaacEnv(EnvBase):
         if not hasattr(self, "_agent_spec"):
             self._agent_spec = {}
         return _AgentSpecView(self)
+    
+    @agent_spec.setter
+    def agent_spec(self, value):
+        raise AttributeError(
+            "Do not set agent_spec directly."
+            "Use `self.agent_spec[agent_name] = AgentSpec(...)` instead."
+        )
 
-    @property
-    def DEFAULT_CAMERA_CONFIG(self):
-        import copy
-
-        return copy.deepcopy(self._DEFAULT_CAMERA_CONFIG)
+    @abc.abstractmethod
+    def _set_specs(self):
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _design_scene(self) -> Optional[List[str]]:
@@ -178,16 +209,21 @@ class IsaacEnv(EnvBase):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         if tensordict is not None:
-            env_mask = tensordict.get("_reset").squeeze()
+            env_mask = tensordict.get("_reset").reshape(self.num_envs)
         else:
             env_mask = torch.ones(self.num_envs, dtype=bool, device=self.device)
         env_ids = env_mask.nonzero().squeeze(-1)
+        last_stats = self.stats.clone()
         self._reset_idx(env_ids)
         # self.sim.step(render=False)
         self.sim._physics_sim_view.flush()
         self.progress_buf[env_ids] = 0.
         self._tensordict["return"][env_ids] = 0.
-        return self._tensordict.update(self._compute_state_and_obs())
+        # tensordict = TensorDict({}, self.batch_size, device=self.device)
+        self._tensordict.update(self._compute_state_and_obs())
+        self._tensordict['stats'] = last_stats
+        self._tensordict.set("truncated", (self.progress_buf > self.max_episode_length).unsqueeze(1))
+        return self._tensordict
 
     @abc.abstractmethod
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -224,7 +260,7 @@ class IsaacEnv(EnvBase):
         torch.manual_seed(seed)
 
     def _configure_simulation_flags(self, sim_params: dict = None):
-        """Configure various simulation flags for performance improvements at load and run time."""
+        """Configure simulation flags and extensions at load and run time."""
         # acquire settings interface
         carb_settings_iface = carb.settings.get_settings()
         # enable hydra scene-graph instancing
@@ -238,11 +274,26 @@ class IsaacEnv(EnvBase):
         # if sim_params["disable_contact_processing"]:
         #     carb_settings_iface.set_bool("/physics/disableContactProcessing", True)
 
-        # enable scene querying if rendering is enabled
-        # this is needed for some GUI features
-        sim_params["enable_scene_query_support"] = True
-        # enable viewport extension if not running in headless mode
-        enable_extension("omni.kit.viewport.bundle")
+        # set flags based on whether rendering is enabled or not
+        # note: enabling extensions is order-sensitive. please do not change the order.
+        if self.enable_viewport:
+            # enable scene querying if rendering is enabled
+            # this is needed for some GUI features
+            sim_params["enable_scene_query_support"] = True
+            # load extra viewport extensions if requested
+            if self.enable_viewport:
+                # extension to enable UI buttons (otherwise we get attribute errors)
+                enable_extension("omni.kit.window.toolbar")
+                # extension to make RTX realtime and path-traced renderers
+                enable_extension("omni.kit.viewport.rtx")
+                # extension to make HydraDelegate renderers
+                enable_extension("omni.kit.viewport.pxr")
+            # enable viewport extension if not running in headless mode
+            enable_extension("omni.kit.viewport.bundle")
+            # load extra render extensions if requested
+            if self.enable_viewport:
+                # extension for window status bar
+                enable_extension("omni.kit.window.status_bar")
         # enable isaac replicator extension
         # note: moved here since it requires to have the viewport extension to be enabled first.
         enable_extension("omni.replicator.isaac")
@@ -250,7 +301,7 @@ class IsaacEnv(EnvBase):
     def to(self, device) -> EnvBase:
         if torch.device(device) != self.device:
             raise RuntimeError(
-                "Cannot move IsaacEnv to a different device once it's initialized."
+                f"Cannot move IsaacEnv on {self.device} to a different device {device} once it's initialized."
             )
         return self
 
@@ -275,6 +326,55 @@ class IsaacEnv(EnvBase):
             self._should_render = enable
         else:
             raise TypeError("enable_render must be a bool or callable.")
+    
+    def render(self, mode: str="human"):
+        if mode == "human":
+            return None
+        elif mode == "rgb_array":
+            # check if viewport is enabled -- if not, then complain because we won't get any data
+            if not self.enable_viewport:
+                raise RuntimeError(
+                    f"Cannot render '{mode}' when enable viewport is False. Please check the provided"
+                    "arguments to the environment class at initialization."
+                )
+            # obtain the rgb data
+            rgb_data = self._rgb_annotator.get_data()
+            # convert to numpy array
+            rgb_data = np.frombuffer(rgb_data, dtype=np.uint8).reshape(*rgb_data.shape)
+            # return the rgb data
+            return rgb_data[:, :, :3]
+        else:
+            raise NotImplementedError(
+                f"Render mode '{mode}' is not supported. Please use: {self.metadata['render.modes']}."
+            )
+    
+    def _create_viewport_render_product(self):
+        """Create a render product of the viewport for rendering."""
+        # set camera view for "/OmniverseKit_Persp" camera
+        set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
+
+        # check if flatcache is enabled
+        # this is needed to flush the flatcache data into Hydra manually when calling `env.render()`
+        # ref: https://docs.omniverse.nvidia.com/prod_extensions/prod_extensions/ext_physics.html
+        # if  self.sim.get_physics_context().use_flatcache:
+        #     from omni.physxflatcache import get_physx_flatcache_interface
+
+        #     # acquire flatcache interface
+        #     self._flatcache_iface = get_physx_flatcache_interface()
+
+        # check if viewport is enabled before creating render product
+        if self.enable_viewport:
+            import omni.replicator.core as rep
+
+            # create render product
+            self._render_product = rep.create.render_product(
+                "/OmniverseKit_Persp", tuple(self.cfg.viewer.resolution)
+            )
+            # create rgb annotator -- used to read data from the render product
+            self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
+            self._rgb_annotator.attach([self._render_product])
+        else:
+            carb.log_info("Viewport is disabled. Skipping creation of render product.")
 
 
 class _AgentSpecView(Dict[str, AgentSpec]):
@@ -282,31 +382,9 @@ class _AgentSpecView(Dict[str, AgentSpec]):
         super().__init__(env._agent_spec)
         self.env = env
 
-    def __setitem__(self, __key, __value) -> None:
-        if isinstance(__value, AgentSpec):
-            if __key in self:
-                raise ValueError(
-                    f"Can not set agent_spec with duplicated name {__key}."
-                )
-            name = __value.name
-
-            def expand(spec: TensorSpec) -> TensorSpec:
-                return spec.expand(*self.env.batch_size, __value.n, *spec.shape)
-
-            self.env.observation_spec[f"{name}.obs"] = expand(__value.observation_spec)
-            if __value.state_spec is not None:
-                shape = (*self.env.batch_size, *__value.state_spec.shape)
-                self.env.observation_spec[f"{name}.state"] = __value.state_spec.expand(
-                    *shape
-                )
-            self.env.action_spec[f"{name}.action"] = expand(__value.action_spec)
-            self.env.reward_spec[f"{name}.reward"] = expand(__value.reward_spec)
-
-            self.env._tensordict["return"] = self.env.reward_spec[
-                f"{name}.reward"
-            ].zero()
-            super().__setitem__(__key, __value)
-            self.env._agent_spec[__key] = __value
-        else:
-            raise TypeError
+    def __setitem__(self, __key: str, __value: AgentSpec) -> None:
+        self.env._tensordict["return"] = self.env.reward_spec.zero()
+        __value._env = self.env
+        return self.env._agent_spec.__setitem__(__key, __value)
+        
 
