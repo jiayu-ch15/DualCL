@@ -809,8 +809,8 @@ class PredatorPrey_debug(IsaacEnv):
         
         root_state = self.drone.get_state()[..., :13].squeeze(0)
         
-        # cmds = self.controller(root_state, target_vel=policy)
-        cmds = self.controller(root_state, control_target)
+        cmds = self.controller(root_state, target_vel=policy)
+        # cmds = self.controller(root_state, control_target)
 
         # cmds = cmds * 0 + 100
 
