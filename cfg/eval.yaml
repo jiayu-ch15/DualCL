@@ -17,7 +17,8 @@ collision_radius: 0.01
 save_interval: 100
 end_checkpoint: 100
 
-headless: true
+# headless: true
+headless: false
 
 sim: ${task.sim}
 env: ${task.env}
