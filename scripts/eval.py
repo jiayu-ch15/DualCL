@@ -94,15 +94,15 @@ class EpisodeStats:
 def main(cfg):
 
     mode = 1
-    eval_choice = 2
+    eval_choice = 4
 
     eval_flags = ['3_narrow', '3_surround', '5_narrow', '5_surround', '2_search']
     cfg.task.evaluation_flag = eval_flags[eval_choice]
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
-    cfg.task.evaluation_flag = 'random'
-    cfg.task.cylinder.max_active = 2
-    cfg.task.cylinder.random_active = False
+    # cfg.task.evaluation_flag = 'random'
+    # cfg.task.cylinder.max_active = 2
+    # cfg.task.cylinder.random_active = False
 
 
     if mode==0:
