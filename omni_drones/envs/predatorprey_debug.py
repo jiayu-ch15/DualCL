@@ -50,7 +50,7 @@ def refresh_cylinder_pos_height(max_cylinder_height, origin_cylinder_pos, device
     origin_height = origin_height + ~low_cylinder_mask * 0.5 * max_cylinder_height
     return origin_cylinder_pos, origin_height
 
-class HideAndSeek_circle_eval_large(IsaacEnv): 
+class PredatorPrey_debug(IsaacEnv): 
     """
     HideAndSeek environment designed for curriculum learning.
 
