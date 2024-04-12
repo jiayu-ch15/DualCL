@@ -1,48 +1,61 @@
-# exp
-num_agents: 3
-num_obstacles: 5
-obstacle_size: 0.05
-v_drone: 1.0
-v_low: 1.3
-v_high: 1.3
-v_obstacle_min: 1.0
-v_obstacle_max: 1.0
-size_min: 1.0
-size_max: 1.0
-model_dir: /root/OmniDrones/scripts/outputs/5obstacle_size1_speed1_3_obstaclespeed0/09-15_07-10/wandb/run-20230915_071043-toc9dkyu/files
-use_collision: 1
-use_speed_penalty: 1
-catch_radius: 0.15
-collision_radius: 0.01
-save_interval: 100
-end_checkpoint: 100
+# model_dir: /home/chenjy/OmniDrones/scripts/outputs/random0to3_final/v2_0_catch0_2_height0_6_size0_9.pt
+# model_dir: /home/chenjy/OmniDrones/scripts/outputs/final_results/DR_wovalidation/seed0/v1_6_catch0_2_height1_2_size0_9.pt
+# model_dir: /home/chenjy/OmniDrones/scripts/outputs/cl_final2/v1_2_catch0_2.pt
+model_dir: null
+# 
+# hydra.job.chdir: false
 
-# headless: true
-headless: false
+
+headless: true
+# headless: false
 
 sim: ${task.sim}
 env: ${task.env}
 
-total_frames: -1
-total_episodes: ${eval:2 * ${env.num_envs}}
+total_frames: 100_000_000_000
+max_iters: -1
+eval_interval: 200
+save_interval: 200
 seed: 0
 
 viewer:
-  eye: [7.5, 7.5, 7.5]
-  lookat: [0., 0., 0.]
+  resolution: [960, 720]
+  # # up
+  # eye: [0.001, 0.0, 6.]
+  # lookat: [0., 0., 2.]
+  # # debug
+  # eye: [0., -4., 4.]
+  # lookat: [0., 0., 1.]
+  # front
+  eye: [-3., -3., 3.5]
+  lookat: [0., 0., 0.7]
 
 wandb:
   group: ${oc.select:..task.name}
-  run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
+  run_name: v1_6_catch0_2_random1_0_fixed3_wodistancereward
+  # run_name: debug
   job_type: train
-  entity: marl-drones
-  project: omnidrones
+  entity: chenjy
+  project: PredatorPrey
+  # mode: online
   mode: disabled # set to 'disabled' when debugging locally
   run_id: 
   monitor_gym: True
   tags: 
 
+
+# wandb:
+#   group: ${oc.select:..task.name}
+#   run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
+#   job_type: train
+#   entity: marl-drones
+#   project: omnidrones200
+#   mode: disabled # set to 'disabled' when debugging locally
+#   run_id: 
+#   monitor_gym: True
+#   tags: 
+
 defaults:
-  - task: Hover
+  - task: PredatorPrey_debug
   - algo: mappo
   - _self_

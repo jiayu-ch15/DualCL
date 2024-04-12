@@ -57,7 +57,7 @@ class Every:
             self.func(*args, **kwargs)
         self.i += 1
 
-@hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
+@hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
 def main(cfg):
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)

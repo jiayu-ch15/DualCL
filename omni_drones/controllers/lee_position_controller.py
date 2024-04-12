@@ -9,7 +9,6 @@ import os.path as osp
 class LeePositionController(nn.Module):
     def __init__(
         self, 
-        dt: float, 
         g: float, 
         uav_params,
     ) -> None:
@@ -64,7 +63,6 @@ class LeePositionController(nn.Module):
         self,
         root_state: torch.Tensor,
         control_target: torch.Tensor,
-        controller_state: TensorDict,
     ):
         pos, rot, vel, ang_vel = torch.split(root_state, [3, 4, 3, 3])
         target_pos, target_vel, target_yaw = torch.split(control_target, [3, 3, 1])
@@ -95,4 +93,4 @@ class LeePositionController(nn.Module):
         ang_acc_thrust = torch.cat([ang_acc, thrust])
         cmd = self.mixer @ ang_acc_thrust
         cmd = (cmd / self.max_thrusts) * 2 - 1
-        return cmd, controller_state
+        return cmd
