@@ -787,9 +787,9 @@ class HideAndSeek_circle_eval_large(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
-        policy = self.Janasov(C_inter=0.5, r_inter=0.5, obs=0.0)
-        # policy = self.Ange(chase=1, rf=0.4, align=0, repel=0.2)
-        # policy = self.APF(lamb=0.3)
+        # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
+        # policy = self.Ange(chase=3, rf=0.4, align=0.1, repel=0.3)
+        policy = self.APF(lamb=0.4)
         
         # cylinders
         policy += self.obs_repel()
@@ -806,6 +806,8 @@ class HideAndSeek_circle_eval_large(IsaacEnv):
         # policy = force_r
         
         # controller函数变了，需要重写
+
+        policy = self._norm(policy) * 1.0 # to avoid nan
         
         # policy[..., 0] = 0
         # policy[..., 1] = 0
