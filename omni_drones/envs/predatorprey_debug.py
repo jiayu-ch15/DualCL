@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import wandb
 import time
 from functorch import vmap
-from omni_drones.utils.torch import cpos, off_diag, others
+from omni_drones.utils.torch import cpos, off_diag, quat_axis, others
 import torch.distributions as D
 from torch.masked import masked_tensor, as_masked_tensor
 
@@ -150,9 +150,10 @@ class PredatorPrey_debug(IsaacEnv):
         
         self.draw = _debug_draw.acquire_debug_draw_interface()
         
-        controller_cls = LeePositionController
+        controller_cls = self.drone.DEFAULT_CONTROLLER
         
         self.controller = controller_cls(
+            self.dt,
             9.81, 
             self.drone.params
         ).to(self.device)
@@ -161,6 +162,8 @@ class PredatorPrey_debug(IsaacEnv):
         #     0.00, 
         #     self.drone.params
         # ).to(self.device)
+        
+        self.controller_state = TensorDict({}, [self.num_envs, self.num_agents], device=self.device)
         
         self.miu_list = torch.tensor([0., 1.], device=self.device)
         self.lamb_list = torch.tensor([0.1, 0.3, 0.5, 0.7, 1.0, 1.5], device=self.device)
@@ -785,7 +788,7 @@ class PredatorPrey_debug(IsaacEnv):
 
         # rule-based
         # policy = self.Janasov(C_inter=0.2, r_inter=0.3, obs=0.0)
-        policy = self.Ange(chase=10, rf=0.4, align=0, repel=0)
+        policy = self.Ange(chase=3, rf=0.4, align=0.1, repel=0.3)
         # policy = self.APF(lamb=0.3)
         
         # cylinders
@@ -798,25 +801,27 @@ class PredatorPrey_debug(IsaacEnv):
         drone_origin_dist = torch.norm(drone_pos[..., :2], dim=-1)
         force_r[..., :2] = - self._norm(drone_pos[..., :2]) / (torch.relu(self.arena_size - drone_origin_dist) + 1e-9).unsqueeze(-1)
         force_r[..., 2] = 1 / (torch.relu(drone_pos[...,2] - 0) + 1e-9) - 1 / (torch.relu(self.max_height - drone_pos[..., 2]) + 1e-9)
-        policy += force_r
+        # policy += force_r
 
-        policy = force_r
-        policy = self._norm(policy) * torch.clip(torch.norm(policy, dim=-1, keepdim=True), 0, 20)
+        # policy = force_r
         
         # controller函数变了，需要重写
         
-        policy[..., 0] = 0
-        policy[..., 1] = 0
-        policy[..., 2] = 20
-        # control_target = self._ctrl_target(policy, self.dt)
+        # policy[..., 0] = 0
+        # policy[..., 1] = 0
+        # policy[..., 2] = 10
+        control_target = self._ctrl_target(policy, self.dt)
         
         root_state = self.drone.get_state()[..., :13].squeeze(0)
+        # target_yaw = quaternion_to_euler(root_state[..., 3:7])[..., -1]
         
-        yaw = quaternion_to_euler(root_state[..., 3:7])[..., -1]
-        cmds = self.controller(root_state, target_vel=policy)
-        # cmds = self.controller(root_state, control_target)
+        # cmds = self.controller(root_state, control_target, self.controller_state)
 
-        # cmds = cmds * 0 + 10
+        cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
+        # cmds, _controller_state = vmap(vmap(self.controller))(root_state.unsqueeze(0), control_target, self.controller_state) # num_envs=1
+        self.controller_state = _controller_state
+
+        # cmds = cmds * 0 + 100
 
         torch.nan_to_num_(cmds, 0.)
         actions = cmds

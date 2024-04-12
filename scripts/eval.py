@@ -93,7 +93,7 @@ class EpisodeStats:
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
 def main(cfg):
     # seed
-    # cfg.seed = int(time.time())%10000
+    cfg.seed = int(time.time())%10000
     torch.manual_seed(cfg.seed)
     torch.cuda.manual_seed_all(cfg.seed)
     torch.backends.cudnn.benchmark = False
