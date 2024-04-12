@@ -787,9 +787,15 @@ class PredatorPrey_debug(IsaacEnv):
         #                   lamb=actions_APF[..., 1].unsqueeze(-1).unsqueeze(-1).expand(-1,-1,3,3),)
 
         # rule-based
+
+        # policy = self.Ange(chase=5, rf=0.5, align=0.1, repel=0.3) # 2_search
+        # policy = self.Ange(chase=10, rf=0.4, align=0.1, repel=0.3) # 5_narrow
+
+
+
         # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
-        # policy = self.Ange(chase=3, rf=0.4, align=0.1, repel=0.3)
-        policy = self.APF(lamb=0.6)
+        policy = self.Ange(chase=7, rf=0.4, align=0.1, repel=0.3)
+        # policy = self.APF(lamb=0.6)
         
         # cylinders
         policy += self.obs_repel()
@@ -807,7 +813,8 @@ class PredatorPrey_debug(IsaacEnv):
         
         # controller函数变了，需要重写
 
-        policy = self._norm(policy) * 1.0 # to avoid nan
+        policy = self._norm(policy) * 1.0 # to avoid flipping
+        # policy = self._norm(policy) * torch.clip(torch.norm(policy, dim=-1, keepdim=True), 0, 5)
         
         # policy[..., 0] = 0
         # policy[..., 1] = 0
@@ -1202,6 +1209,13 @@ class PredatorPrey_debug(IsaacEnv):
         force[..., :2] = torch.sum(p_drone_cy / (torch.relu(dist_drone_cy - self.cylinder_size - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2)
         force[..., 2] = torch.sum(1 / (torch.relu(z_dist - 0.05) + 1e-9) * z_mask * cylinder_mask, dim=-2).squeeze(-1)
         
+        # if xy_dist>0 and z_dist>0
+        p_circle = torch.zeros(self.num_envs, self.num_agents, self.num_cylinders, 3, device=self.device)
+        p_circle[..., :2] = p_drone_cy * xy_dist
+        p_circle[..., 2] = z_dist[..., 0]
+        p_force = torch.sum(self._norm(p_circle, p=1) * (xy_dist > 0) * (z_dist > 0) * cylinder_mask, dim=-2)
+        force += p_force
+
         return force
     
     @property

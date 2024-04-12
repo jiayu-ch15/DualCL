@@ -92,8 +92,33 @@ class EpisodeStats:
 # import config file
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
 def main(cfg):
+
+    mode = 1
+    eval_choice = 2
+
+    eval_flags = ['3_narrow', '3_surround', '5_narrow', '5_surround', '2_search']
+    cfg.task.evaluation_flag = eval_flags[eval_choice]
+    cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
+
+    cfg.task.evaluation_flag = 'random'
+    cfg.task.cylinder.max_active = 2
+    cfg.task.cylinder.random_active = False
+
+
+    if mode==0:
+        # render
+        cfg.headless = False
+        cfg.env.num_envs = 16
+        cfg.env.max_episode_length = 400
+    elif mode==1:
+        # test
+        cfg.headless = True
+        cfg.env.num_envs = 500
+        cfg.env.max_episode_length = 800
+
+
     # seed
-    # cfg.seed = int(time.time())%10000
+    cfg.seed = int(time.time())%10000
     torch.manual_seed(cfg.seed)
     torch.cuda.manual_seed_all(cfg.seed)
     torch.backends.cudnn.benchmark = False

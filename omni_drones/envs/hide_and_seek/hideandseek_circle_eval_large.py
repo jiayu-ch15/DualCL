@@ -1202,6 +1202,13 @@ class HideAndSeek_circle_eval_large(IsaacEnv):
         force[..., :2] = torch.sum(p_drone_cy / (torch.relu(dist_drone_cy - self.cylinder_size - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2)
         force[..., 2] = torch.sum(1 / (torch.relu(z_dist - 0.05) + 1e-9) * z_mask * cylinder_mask, dim=-2).squeeze(-1)
         
+        # if xy_dist>0 and z_dist>0
+        p_circle = torch.zeros(self.num_envs, self.num_agents, self.num_cylinders, 3, device=self.device)
+        p_circle[..., :2] = p_drone_cy * xy_dist
+        p_circle[..., 2] = z_dist[..., 0]
+        p_force = torch.sum(self._norm(p_circle, p=1) * (xy_dist > 0) * (z_dist > 0) * cylinder_mask, dim=-2)
+        force += p_force
+
         return force
     
     @property
