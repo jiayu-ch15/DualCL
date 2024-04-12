@@ -133,9 +133,9 @@ class LeePositionController(nn.Module):
     
     def _compute(self, root_state, target_pos, target_vel, target_acc, target_yaw, body_rate):
         pos, rot, vel, ang_vel = torch.split(root_state, [3, 4, 3, 3], dim=-1)
-        if not body_rate:
-            # convert angular velocity from world frame to body frame
-            ang_vel = quat_rotate_inverse(rot, ang_vel)
+        # if not body_rate:
+        #     # convert angular velocity from world frame to body frame
+        #     ang_vel = quat_rotate_inverse(rot, ang_vel)
         
         pos_error = pos - target_pos
         vel_error = vel - target_vel

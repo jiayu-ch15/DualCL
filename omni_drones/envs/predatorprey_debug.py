@@ -801,16 +801,18 @@ class PredatorPrey_debug(IsaacEnv):
         policy += force_r
 
         policy = force_r
+        policy = self._norm(policy) * torch.clip(torch.norm(policy, dim=-1, keepdim=True), 0, 20)
         
         # controller函数变了，需要重写
         
-        # policy[..., 0] = 0
-        # policy[..., 1] = 0
-        # policy[..., 2] = force_r[..., 2]
+        policy[..., 0] = 0
+        policy[..., 1] = 0
+        policy[..., 2] = 20
         # control_target = self._ctrl_target(policy, self.dt)
         
         root_state = self.drone.get_state()[..., :13].squeeze(0)
         
+        yaw = quaternion_to_euler(root_state[..., 3:7])[..., -1]
         cmds = self.controller(root_state, target_vel=policy)
         # cmds = self.controller(root_state, control_target)
 
