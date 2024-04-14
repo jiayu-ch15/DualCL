@@ -93,27 +93,30 @@ class EpisodeStats:
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="eval")
 def main(cfg):
 
-    mode = 1
-    eval_choice = 4
-
+    task_choice = 4
+    
+    test_mode = 1
+    
+    cfg.task.catch_radius = 0.12
+    
     eval_flags = ['3_narrow', '3_surround', '5_narrow', '5_surround', '2_search']
-    cfg.task.evaluation_flag = eval_flags[eval_choice]
+    cfg.task.evaluation_flag = eval_flags[task_choice]
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
     # cfg.task.evaluation_flag = 'random'
-    # cfg.task.cylinder.max_active = 2
+    # cfg.task.cylinder.max_active = 3
     # cfg.task.cylinder.random_active = False
 
 
-    if mode==0:
+    if test_mode==0:
         # render
         cfg.headless = False
         cfg.env.num_envs = 16
         cfg.env.max_episode_length = 400
-    elif mode==1:
+    elif test_mode==1:
         # test
         cfg.headless = True
-        cfg.env.num_envs = 500
+        cfg.env.num_envs = 100
         cfg.env.max_episode_length = 800
 
 

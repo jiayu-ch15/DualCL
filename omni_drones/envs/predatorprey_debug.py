@@ -798,7 +798,7 @@ class PredatorPrey_debug(IsaacEnv):
         # policy = self.APF(lamb=0.6)
         
         # cylinders
-        policy += self.obs_repel()
+        policy += self.obs_repel(self.drone_pos)
         
         # arena force
         # 3D
@@ -1095,16 +1095,18 @@ class PredatorPrey_debug(IsaacEnv):
         force += force_r
         
         # cylinders
-        cylinders_pos, _ = self.cylinders.get_world_poses() # don't use env_poses
-        cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
-                                                                          origin_cylinder_pos=cylinders_pos,
-                                                                          device=self.device)
-        dist_pos = (torch.norm(prey_pos[..., :3] - cylinders_pos[..., :3],dim=-1) - self.cylinder_size).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
-        direction_c = (prey_pos[..., :3] - cylinders_pos[..., :3]) / (dist_pos + 1e-9)
-        force_c = direction_c * (1 / (dist_pos + 1e-9))
-        cylinder_force_mask = self.cylinders_mask.unsqueeze(-1).expand(-1, -1, 3)
-        force_c = force_c * cylinder_force_mask
-        force[..., :3] += torch.sum(force_c, dim=1)
+        # cylinders_pos, _ = self.cylinders.get_world_poses() # don't use env_poses
+        # cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
+        #                                                                   origin_cylinder_pos=cylinders_pos,
+        #                                                                   device=self.device)
+        # dist_pos = (torch.norm(prey_pos[..., :3] - cylinders_pos[..., :3],dim=-1) - self.cylinder_size).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
+        # direction_c = (prey_pos[..., :3] - cylinders_pos[..., :3]) / (dist_pos + 1e-9)
+        # force_c = direction_c * (1 / (dist_pos + 1e-9))
+        # cylinder_force_mask = self.cylinders_mask.unsqueeze(-1).expand(-1, -1, 3)
+        # force_c = force_c * cylinder_force_mask
+        # force[..., :3] += torch.sum(force_c, dim=1)
+        
+        force += self.obs_repel(self.prey_pos.unsqueeze(-2)).reshape_as(force)
 
         # set force_z to 0
         return force.type(torch.float32)
@@ -1189,28 +1191,29 @@ class PredatorPrey_debug(IsaacEnv):
         return action
 
     
-    def obs_repel(self):
+    def obs_repel(self, pos):
+        # drone or prey
+        shape_pos = pos.shape
         # cylinders
         cylinder_mask = self.cylinders_mask.reshape(self.num_envs, 1, -1, 1)
-        drone_pos = self.drone_pos
-        force = torch.zeros_like(drone_pos)
+        force = torch.zeros_like(pos)
         cylinders_pos, _ = self.get_env_poses(self.cylinders.get_world_poses())
         cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
                                                                           origin_cylinder_pos=cylinders_pos,
                                                                           device=self.device)
-        xy_dist = (torch.norm(vmap(cpos)(drone_pos[..., :2], cylinders_pos[..., :2]), dim=-1) - self.cylinder_size).unsqueeze(-1)
-        z_dist = vmap(cpos)(drone_pos[..., 2].unsqueeze(-1), cylinders_height.unsqueeze(-1))
+        xy_dist = (torch.norm(vmap(cpos)(pos[..., :2], cylinders_pos[..., :2]), dim=-1) - self.cylinder_size).unsqueeze(-1)
+        z_dist = vmap(cpos)(pos[..., 2].unsqueeze(-1), cylinders_height.unsqueeze(-1))
         xy_mask = (xy_dist > 0) * (z_dist < 0) * 1.0
         z_mask = (xy_dist < 0) * (z_dist > 0) * 1.0
         # xy
-        drone_to_cy = vmap(cpos)(drone_pos[..., :2], cylinders_pos[..., :2])
+        drone_to_cy = vmap(cpos)(pos[..., :2], cylinders_pos[..., :2])
         dist_drone_cy = torch.norm(drone_to_cy, dim=-1, keepdim=True)
         p_drone_cy = drone_to_cy / (dist_drone_cy + 1e-9)
-        force[..., :2] = torch.sum(p_drone_cy / (torch.relu(dist_drone_cy - self.cylinder_size - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2)
+        force[..., :2] = torch.sum(p_drone_cy / (torch.relu(dist_drone_cy - self.cylinder_size - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2) # 0.05 also for ball
         force[..., 2] = torch.sum(1 / (torch.relu(z_dist - 0.05) + 1e-9) * z_mask * cylinder_mask, dim=-2).squeeze(-1)
         
         # if xy_dist>0 and z_dist>0
-        p_circle = torch.zeros(self.num_envs, self.num_agents, self.num_cylinders, 3, device=self.device)
+        p_circle = torch.zeros(self.num_envs, shape_pos[1], self.num_cylinders, 3, device=self.device)
         p_circle[..., :2] = p_drone_cy * xy_dist
         p_circle[..., 2] = z_dist[..., 0]
         p_force = torch.sum(self._norm(p_circle, p=1) * (xy_dist > 0) * (z_dist > 0) * cylinder_mask, dim=-2)
