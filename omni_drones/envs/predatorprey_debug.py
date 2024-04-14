@@ -794,7 +794,7 @@ class PredatorPrey_debug(IsaacEnv):
 
 
         # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
-        policy = self.Ange(chase=7, rf=0.4, align=0.1, repel=0.3)
+        policy = self.Ange(chase=20, rf=0.4, align=0.1, repel=0.3)
         # policy = self.APF(lamb=0.6)
         
         # cylinders
@@ -1095,18 +1095,18 @@ class PredatorPrey_debug(IsaacEnv):
         force += force_r
         
         # cylinders
-        # cylinders_pos, _ = self.cylinders.get_world_poses() # don't use env_poses
-        # cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
-        #                                                                   origin_cylinder_pos=cylinders_pos,
-        #                                                                   device=self.device)
-        # dist_pos = (torch.norm(prey_pos[..., :3] - cylinders_pos[..., :3],dim=-1) - self.cylinder_size).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
-        # direction_c = (prey_pos[..., :3] - cylinders_pos[..., :3]) / (dist_pos + 1e-9)
-        # force_c = direction_c * (1 / (dist_pos + 1e-9))
-        # cylinder_force_mask = self.cylinders_mask.unsqueeze(-1).expand(-1, -1, 3)
-        # force_c = force_c * cylinder_force_mask
-        # force[..., :3] += torch.sum(force_c, dim=1)
+        cylinders_pos, _ = self.cylinders.get_world_poses() # don't use env_poses
+        cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
+                                                                          origin_cylinder_pos=cylinders_pos,
+                                                                          device=self.device)
+        dist_pos = (torch.norm(prey_pos[..., :3] - cylinders_pos[..., :3],dim=-1) - self.cylinder_size).unsqueeze(-1).expand(-1, -1, 3) # expand to 3-D
+        direction_c = (prey_pos[..., :3] - cylinders_pos[..., :3]) / (dist_pos + 1e-9)
+        force_c = direction_c * (1 / (dist_pos + 1e-9))
+        cylinder_force_mask = self.cylinders_mask.unsqueeze(-1).expand(-1, -1, 3)
+        force_c = force_c * cylinder_force_mask
+        force[..., :3] += torch.sum(force_c, dim=1)
         
-        force += self.obs_repel(self.prey_pos.unsqueeze(-2)).reshape_as(force)
+        # force += self.obs_repel(self.prey_pos.unsqueeze(-2)).reshape_as(force)
 
         # set force_z to 0
         return force.type(torch.float32)

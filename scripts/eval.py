@@ -104,7 +104,7 @@ def main(cfg):
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
     # cfg.task.evaluation_flag = 'random'
-    # cfg.task.cylinder.max_active = 3
+    # cfg.task.cylinder.max_active = 1
     # cfg.task.cylinder.random_active = False
 
 
