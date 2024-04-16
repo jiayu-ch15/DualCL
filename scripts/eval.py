@@ -97,6 +97,7 @@ def main(cfg):
     
     test_mode = 1
     
+    cfg.task.v_prey = 2.4
     cfg.task.catch_radius = 0.12
     
     eval_flags = ['3_narrow', '3_surround', '5_narrow', '5_surround', '2_search']
@@ -104,7 +105,7 @@ def main(cfg):
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
     # cfg.task.evaluation_flag = 'random'
-    # cfg.task.cylinder.max_active = 1
+    # cfg.task.cylinder.max_active = 0
     # cfg.task.cylinder.random_active = False
 
 
@@ -116,7 +117,7 @@ def main(cfg):
     elif test_mode==1:
         # test
         cfg.headless = True
-        cfg.env.num_envs = 100
+        cfg.env.num_envs = 200
         cfg.env.max_episode_length = 800
 
 

@@ -215,7 +215,9 @@ class PredatorPrey_debug(IsaacEnv):
         # stats and infos
         stats_spec = CompositeSpec({
             "capture": UnboundedContinuousTensorSpec(1),
+            "collision": UnboundedContinuousTensorSpec(1),
             "capture_episode": UnboundedContinuousTensorSpec(1),
+            "collision_episode": UnboundedContinuousTensorSpec(1),
             "capture_per_step": UnboundedContinuousTensorSpec(1),
             "first_capture_step": UnboundedContinuousTensorSpec(1),
             # "cover_rate": UnboundedContinuousTensorSpec(1),
@@ -792,10 +794,9 @@ class PredatorPrey_debug(IsaacEnv):
         # policy = self.Ange(chase=10, rf=0.4, align=0.1, repel=0.3) # 5_narrow
 
 
-
         # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
-        policy = self.Ange(chase=20, rf=0.4, align=0.1, repel=0.3)
-        # policy = self.APF(lamb=0.6)
+        policy = self.Ange(chase=1, rf=0.4, align=0.0, repel=0.25) * 10.0
+        # policy = self.APF(lamb=0.3) * 7.0
         
         # cylinders
         policy += self.obs_repel(self.drone_pos)
@@ -814,11 +815,7 @@ class PredatorPrey_debug(IsaacEnv):
         # controller函数变了，需要重写
 
         policy = self._norm(policy) * 1.0 # to avoid flipping
-        # policy = self._norm(policy) * torch.clip(torch.norm(policy, dim=-1, keepdim=True), 0, 5)
-        
-        # policy[..., 0] = 0
-        # policy[..., 1] = 0
-        # policy[..., 2] = 10
+
         control_target = self._ctrl_target(policy, self.dt)
         
         root_state = self.drone.get_state()[..., :13].squeeze(0)
@@ -827,7 +824,7 @@ class PredatorPrey_debug(IsaacEnv):
         # cmds = self.controller(root_state, control_target, self.controller_state)
 
         cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
-        # cmds, _controller_state = vmap(vmap(self.controller))(root_state.unsqueeze(0), control_target, self.controller_state) # num_envs=1
+        
         self.controller_state = _controller_state
 
         # cmds = cmds * 0 + 100
@@ -1024,13 +1021,19 @@ class PredatorPrey_debug(IsaacEnv):
         cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
                                                                           origin_cylinder_pos=cylinders_pos,
                                                                           device=self.device)
+        
         for i in range(self.num_cylinders):
             relative_pos = drone_pos[..., :2] - cylinders_pos[:, i, :2].unsqueeze(-2)
             norm_r = torch.norm(relative_pos, dim=-1)
-            if_coll = (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
+            # if_coll = (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
+            if_coll = ((drone_pos[..., 2] - cylinders_height[:, i].unsqueeze(-1) - self.collision_radius) < 0) \
+                * (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
             tmp_cylinder_mask = self.cylinders_mask[:, i].unsqueeze(-1).expand(-1, self.num_agents)
             coll_reward -= if_coll * tmp_cylinder_mask # sparse
 
+        self.stats['collision_episode'].add_((torch.sum(coll_reward, dim=1) < 0.0).unsqueeze(-1))
+        self.stats['collision'].set_(torch.from_numpy(self.stats['collision_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
+        
         # distance reward
         # min_dist = target_dist
         min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
@@ -1207,15 +1210,14 @@ class PredatorPrey_debug(IsaacEnv):
         z_mask = (xy_dist < 0) * (z_dist > 0) * 1.0
         # xy
         drone_to_cy = vmap(cpos)(pos[..., :2], cylinders_pos[..., :2])
-        dist_drone_cy = torch.norm(drone_to_cy, dim=-1, keepdim=True)
-        p_drone_cy = drone_to_cy / (dist_drone_cy + 1e-9)
-        force[..., :2] = torch.sum(p_drone_cy / (torch.relu(dist_drone_cy - self.cylinder_size - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2) # 0.05 also for ball
+        p_drone_cy = self._norm(drone_to_cy)
+        force[..., :2] = torch.sum(p_drone_cy / (torch.relu(xy_dist - 0.05) + 1e-9) * xy_mask * cylinder_mask, dim=-2) # 0.05 also for ball
         force[..., 2] = torch.sum(1 / (torch.relu(z_dist - 0.05) + 1e-9) * z_mask * cylinder_mask, dim=-2).squeeze(-1)
         
         # if xy_dist>0 and z_dist>0
         p_circle = torch.zeros(self.num_envs, shape_pos[1], self.num_cylinders, 3, device=self.device)
-        p_circle[..., :2] = p_drone_cy * xy_dist
-        p_circle[..., 2] = z_dist[..., 0]
+        p_circle[..., :2] = p_drone_cy * (xy_dist - 0.05)
+        p_circle[..., 2] = z_dist[..., 0]  - 0.05
         p_force = torch.sum(self._norm(p_circle, p=1) * (xy_dist > 0) * (z_dist > 0) * cylinder_mask, dim=-2)
         force += p_force
 
