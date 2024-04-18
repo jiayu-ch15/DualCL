@@ -794,9 +794,9 @@ class PredatorPrey_debug(IsaacEnv):
         # policy = self.Ange(chase=10, rf=0.4, align=0.1, repel=0.3) # 5_narrow
 
 
-        # policy = self.Janasov(C_inter=0.5, r_inter=0.5)
+        # policy = self.Janasov(C_inter=0.25, r_inter=0.4) * 10.0
         policy = self.Ange(chase=1, rf=0.4, align=0.0, repel=0.25) * 10.0
-        # policy = self.APF(lamb=0.3) * 7.0
+        # policy = self.APF(lamb=0.2) * 10.0
         
         # cylinders
         policy += self.obs_repel(self.drone_pos)
@@ -823,7 +823,8 @@ class PredatorPrey_debug(IsaacEnv):
         
         # cmds = self.controller(root_state, control_target, self.controller_state)
 
-        cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
+        cmds, _controller_state = vmap(vmap(self.controller))(root_state.unsqueeze(0), control_target, self.controller_state) # num_envs=1
+        # cmds, _controller_state = vmap(vmap(self.controller))(root_state, control_target, self.controller_state)
         
         self.controller_state = _controller_state
 

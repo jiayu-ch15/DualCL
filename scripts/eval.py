@@ -95,7 +95,7 @@ def main(cfg):
 
     task_choice = 4
     
-    test_mode = 1
+    test_mode = 0
     
     cfg.task.v_prey = 2.4
     cfg.task.catch_radius = 0.12
@@ -104,25 +104,26 @@ def main(cfg):
     cfg.task.evaluation_flag = eval_flags[task_choice]
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
-    # cfg.task.evaluation_flag = 'random'
-    # cfg.task.cylinder.max_active = 0
-    # cfg.task.cylinder.random_active = False
+    cfg.task.evaluation_flag = 'random'
+    cfg.task.cylinder.max_active = 0
+    cfg.task.cylinder.random_active = False
 
 
     if test_mode==0:
         # render
         cfg.headless = False
-        cfg.env.num_envs = 16
+        cfg.env.num_envs = 1
         cfg.env.max_episode_length = 400
     elif test_mode==1:
         # test
         cfg.headless = True
-        cfg.env.num_envs = 200
+        cfg.env.num_envs = 100
         cfg.env.max_episode_length = 800
 
 
     # seed
-    cfg.seed = int(time.time())%10000
+    cfg.seed = 0
+    # cfg.seed = int(time.time())%10000
     torch.manual_seed(cfg.seed)
     torch.cuda.manual_seed_all(cfg.seed)
     torch.backends.cudnn.benchmark = False
