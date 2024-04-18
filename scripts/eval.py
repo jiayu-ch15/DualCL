@@ -104,7 +104,8 @@ def main(cfg):
     cfg.task.evaluation_flag = eval_flags[task_choice]
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
-    cfg.task.evaluation_flag = 'random'
+    # cfg.task.evaluation_flag = 'random'
+    cfg.task.evaluation_flag = 'sim2real'
     cfg.task.cylinder.max_active = 0
     cfg.task.cylinder.random_active = False
 

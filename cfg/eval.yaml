@@ -21,11 +21,8 @@ seed: 0
 viewer:
   resolution: [960, 720]
   # # up
-  # eye: [0.001, 0.0, 6.]
-  # lookat: [0., 0., 2.]
-  # # debug
-  # eye: [0., -4., 4.]
-  # lookat: [0., 0., 1.]
+  # eye: [0.0, 0.0, 6.]
+  # lookat: [0.01, 0.01, 2.]
   # front
   eye: [-0.01, -0.01, 5.0]
   lookat: [0., 0., 0.7]

@@ -398,6 +398,43 @@ class PredatorPrey_debug(IsaacEnv):
             target_pos = torch.stack(target_pos, dim=0).type(torch.float32)
             cylinders_pos = torch.stack(cylinders_pos, dim=0).type(torch.float32)
             cylinders_mask = torch.stack(cylinders_mask, dim=0).type(torch.float32) # 1 means active, 0 means inactive
+        elif evaluation_flag == 'sim2real':
+            drone_pos = []
+            target_pos = []
+            cylinders_pos = []
+            cylinders_mask = [] 
+            for _ in range(num_envs):
+                if self.random_active:
+                    num_active_cylinder = torch.randint(self.min_active_cylinders, self.max_active_cylinders + 1, (1,)).item()
+                else:
+                    num_active_cylinder = self.max_active_cylinders
+                drone_pos_one, target_pos_one, \
+                    cylinder_pos_one, cylinder_mask_one = self.uniform_generate_envs(num_active_cylinder=num_active_cylinder)
+                # # TODO: for sim2real, set z = 0.0
+                target_pos_one[0] = 0.3
+                target_pos_one[1] = 0.3
+                target_pos_one[2] = 0.3
+                drone_pos_one[0, 0] = 0.5
+                drone_pos_one[0, 1] = 0.5
+                drone_pos_one[1, 0] = 0.5
+                drone_pos_one[1, 1] = - 0.5
+                drone_pos_one[2, 0] = - 0.5
+                drone_pos_one[2, 1] = - 0.5
+                drone_pos_one[3, 0] = - 0.5
+                drone_pos_one[3, 1] = 0.5
+                drone_pos_one[:, -1] = 0.05
+                # # 1 cylinder
+                # cylinder_pos_one[0, 0] = 0.0
+                # cylinder_pos_one[0, 1] = 0.0
+                # cylinder_pos_one[0, 2] = self.max_height / 2
+                drone_pos.append(drone_pos_one)
+                target_pos.append(target_pos_one)
+                cylinders_pos.append(cylinder_pos_one)
+                cylinders_mask.append(cylinder_mask_one)
+            drone_pos = torch.stack(drone_pos, dim=0).type(torch.float32)
+            target_pos = torch.stack(target_pos, dim=0).type(torch.float32)
+            cylinders_pos = torch.stack(cylinders_pos, dim=0).type(torch.float32)
+            cylinders_mask = torch.stack(cylinders_mask, dim=0).type(torch.float32) # 1 means active, 0 means inactive
         elif evaluation_flag == '3_narrow':
             drone_pos = []
             target_pos = []
