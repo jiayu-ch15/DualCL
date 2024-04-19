@@ -284,7 +284,7 @@ def main(cfg):
             # from PIL import Image
             # for idx in range(len(video_array)):
             #     image = Image.fromarray(video_array[idx].transpose(1, 2, 0))
-            #     image.save("{}.png".format(idx))
+            #     image.save("{}.pdf".format(idx))
             #     if idx >= 200:
             #         break
             frames.clear()

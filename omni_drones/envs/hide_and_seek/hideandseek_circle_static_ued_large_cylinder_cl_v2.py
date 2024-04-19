@@ -654,8 +654,8 @@ class HideAndSeek_circle_static_UED_large_cylinder_cl_v2(IsaacEnv):
                 self.min_distance_task.append(np.array(cl_task_one))
                 # self.outer_curriculum_module.insert(np.array(cl_task_one))
                 
-            if idx == self.central_env_idx and self._should_render(0):
-                self._draw_court_circle(self.arena_size)
+            # if idx == self.central_env_idx and self._should_render(0):
+            #     self._draw_court_circle(self.arena_size)
 
         # end_time = time.time()
         # print('reset time', end_time - start_time)
@@ -742,10 +742,10 @@ class HideAndSeek_circle_static_UED_large_cylinder_cl_v2(IsaacEnv):
         self.drone_rpos = vmap(off_diag)(self.drone_rpos)
         
         # draw drone trajectory and detection range
-        if self._should_render(0):
-            self._draw_traj()
-            if self.detect_range > 0.0:
-                self._draw_detection()       
+        # if self._should_render(0):
+        #     self._draw_traj()
+        #     if self.detect_range > 0.0:
+        #         self._draw_detection()       
 
         drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
         self.drone_sum_speed += drone_speed_norm
