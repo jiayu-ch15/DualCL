@@ -115,7 +115,7 @@ class DSLPIDController(nn.Module):
         )
 
         thrust = (
-            torch.sqrt(scalar_thrust / (4 * self.KF)) - self.PWM2RPM_CONST
+            torch.sqrt(torch.relu(scalar_thrust) / (4 * self.KF)) - self.PWM2RPM_CONST
         ) / self.PWM2RPM_SCALE
         pwm = torch.clip(thrust + self.MIXER_MATRIX @ target_torque, 0, 65535)
         rpms = self.PWM2RPM_SCALE * pwm + self.PWM2RPM_CONST
