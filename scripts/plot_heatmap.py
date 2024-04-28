@@ -74,7 +74,7 @@ def check_inside(pos):
         return False
     return True
 
-tasks = np.load('/home/chenjy/OmniDrones/scripts/outputs/cl_collisioncoef_5_v2_4_catch0_25/04-18_22-25/wandb/run-20240418_222557-ky8j44vv/files/tasks/tasks_700.npy')
+tasks = np.load('/home/chenjy/OmniDrones/scripts/outputs/cl_wodistance_v2_4_catch0_12/04-20_17-32/wandb/run-20240420_173239-6r6gs9ht/files/tasks/tasks_7200.npy')
 num_drone = 4
 num_target = 1
 num_active_cylinder = 3
@@ -96,7 +96,7 @@ drone_pos3 = drones_pos[num_idx_3]
 target_pos3 = target_pos[num_idx_3]
 
 # plot pos
-show_idx = -1
+show_idx = -6
 plot_objects(drone_pos0[show_idx].reshape(-1, 3), target_pos3[show_idx], active_cylinder_pos[show_idx].reshape(-1, 3))
 plot_objects_3D(drone_pos3[show_idx].reshape(-1, 3), target_pos3[show_idx], active_cylinder_pos[show_idx].reshape(-1, 3))
 drone_target_dist = get_dist(drones_pos.reshape(-1, 4, 3), target_pos[:,np.newaxis])

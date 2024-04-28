@@ -219,28 +219,28 @@ def main(cfg):
     )
 
     @torch.no_grad()
-    def evaluate(
+    def render(
         seed: int=0
     ):
         """
         Evaluate function called every certain steps. 
         Used to record statistics and videos.
         """
-        # frames = []
+        frames = []
 
         # set env to rendering and evaluation mode
         base_env.enable_render(True)
         base_env.eval()
         env.eval()
-        base_env.set_train = False
+        # base_env.set_train = False
         env.set_seed(seed)
 
         from tqdm import tqdm
         t = tqdm(total=base_env.max_episode_length)
         
         def record_frame(*args, **kwargs):
-            # frame = env.base_env.render(mode="rgb_array")
-            # frames.append(frame)
+            frame = env.base_env.render(mode="rgb_array")
+            frames.append(frame)
             t.update(2)
 
         # get one episode rollout using current policy and form a trajectory
@@ -252,18 +252,86 @@ def main(cfg):
             break_when_any_done=False,
             return_contiguous=False
         )
+
+        env.train() # set env back to training mode after evaluation
+        base_env.set_train = True
+        env.reset()
+
+        # after rollout, set rendering mode to not headless and reset env
+        base_env.enable_render(not cfg.headless)
+        env.reset()
+
+        # get first done index of each trajectory
+        done = trajs.get(("next", "done"))
+        first_done = torch.argmax(done.long(), dim=1).cpu()
+
+        def take_first_episode(tensor: torch.Tensor):
+            indices = first_done.reshape(first_done.shape+(1,)*(tensor.ndim-2))
+            return torch.take_along_dim(tensor, indices, dim=1).reshape(-1)
+
+        traj_stats = {
+            k: take_first_episode(v)
+            for k, v in trajs[("next", "stats")].cpu().items()
+        }
+
+        info = {
+            "eval/stats." + k: torch.nanmean(v.float()).item() 
+            for k, v in traj_stats.items()
+        }
         
+        # render video
+        if len(frames):
+            # video_array = torch.stack(frames)
+            video_array = np.stack(frames).transpose(0, 3, 1, 2)
+            frames.clear()
+            info["recording"] = wandb.Video(
+                video_array, fps=0.5 / cfg.sim.dt, format="mp4"
+            )
+                
+        return info
+
+    @torch.no_grad()
+    def evaluate(
+        seed: int=0
+    ):
+        """
+        Evaluate function called every certain steps. 
+        Used to record statistics and videos.
+        """
+
+        # set env to rendering and evaluation mode
+        base_env.enable_render(True)
+        base_env.eval()
+        env.eval()
+        base_env.set_train = False
+        env.set_seed(seed)
+
+        from tqdm import tqdm
+        t = tqdm(total=base_env.max_episode_length)
+
+        def record(*args, **kwargs):
+            t.update(2)
+
+        # get one episode rollout using current policy and form a trajectory
+        trajs = env.rollout(
+            max_steps=base_env.max_episode_length,
+            policy=lambda x: policy(x, deterministic=True),
+            callback=Every(record, 2),
+            auto_reset=True,
+            break_when_any_done=False,
+            return_contiguous=False
+        )
+
         # manual cl evaluation
         eval_num_cylinders = np.arange(cfg.task.cylinder.min_active, cfg.task.cylinder.max_active + 1)
         capture_dict = dict()
         for idx in range(len(eval_num_cylinders)):
             num_cylinder = eval_num_cylinders[idx]
             capture_dict.update({'capture_{}'.format(num_cylinder): trajs['info']['capture_{}'.format(num_cylinder)][:, -1].mean().cpu().numpy()})
+        # base_env.update_base_cl(capture_dict=capture_dict)
 
         # after rollout, set rendering mode to not headless and reset env
         base_env.enable_render(not cfg.headless)
-
-        base_env._update_curriculum(capture_dict=capture_dict)
         env.train() # set env back to training mode after evaluation
         base_env.set_train = True
         env.reset()
@@ -286,24 +354,24 @@ def main(cfg):
             for k, v in traj_stats.items()
         }
         
-        # # render video
-        # if len(frames):
-        #     # video_array = torch.stack(frames)
-        #     video_array = np.stack(frames).transpose(0, 3, 1, 2)
-        #     frames.clear()
-        #     info["recording"] = wandb.Video(
-        #         video_array, fps=0.5 / cfg.sim.dt, format="mp4"
-        #     )
-        
-        # info.update(capture_dict)
-        
+        info.update(capture_dict)
+                        
         return info
 
     pbar = tqdm(collector)
     env.train() # set env into training mode
     base_env.set_train = True
     fps = []
-        
+    
+    # mkdir for cl
+    cl_model_dir = os.path.join(run.dir, 'tasks')
+    if not os.path.exists(cl_model_dir):
+        os.makedirs(cl_model_dir)
+    
+    # 代表细粒度的cl，metric: distance
+    # 内层一直存中等难度的
+    # 外层一直更新
+    
     # for each iteration, the collector perform one step in the env
     # and get the result rollout as data
     for i, data in enumerate(pbar):
@@ -325,13 +393,19 @@ def main(cfg):
         # update the policy using rollout data and store the training statistics
         info.update(policy.train_op(data.to_tensordict()))
 
-        # evaluate every certain step
-        if i > 0 and eval_interval > 0 and i % eval_interval == 0:
+        # update cl before sampling
+        if eval_interval > 0 and i % eval_interval == 0:
             logging.info(f"Eval at {collector._frames} steps.")
             info.update(evaluate())
+        
+        if i % 100 == 0 and i > 0:
+            base_env.outer_curriculum_module.save_task(cl_model_dir, i)
+        
+        # info.update(render())
 
         # save policy model every certain step
         if save_interval > 0 and i % save_interval == 0:
+            
             if hasattr(policy, "state_dict"):
                 ckpt_path = os.path.join(run.dir, f"checkpoint_{collector._frames}.pt")
                 logging.info(f"Save checkpoint to {str(ckpt_path)}")
