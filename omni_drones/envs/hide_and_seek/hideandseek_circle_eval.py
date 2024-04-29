@@ -37,9 +37,9 @@ from omni_drones.controllers import LeePositionController
 
 from omni.isaac.debug_draw import _debug_draw
 
-from ..placement import rejection_sampling_with_validation_large_cylinder, rejection_sampling_with_validation_large_cylinder_cl, generate_outside_cylinders_x_y, generate_drone_target_large_after_cylinder
-from ..draw import draw_traj, draw_detection
-from ..draw_circle import Float3, _COLOR_ACCENT, _carb_float3_add, draw_court_circle
+from .placement import rejection_sampling_with_validation_large_cylinder, rejection_sampling_with_validation_large_cylinder_cl, generate_outside_cylinders_x_y, generate_drone_target_large_after_cylinder
+from .draw import draw_traj, draw_detection
+from .draw_circle import Float3, _COLOR_ACCENT, _carb_float3_add, draw_court_circle
 
 # set lower cylidner to real pos and height
 def refresh_cylinder_pos_height(max_cylinder_height, origin_cylinder_pos, device):

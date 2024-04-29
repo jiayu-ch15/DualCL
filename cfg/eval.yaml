@@ -1,6 +1,5 @@
 model_dir: null
 
-
 headless: false
 
 sim: ${task.sim}
