@@ -359,7 +359,6 @@ class PredatorPrey_debug(IsaacEnv):
 
         return ["/World/defaultGroundPlane"]
 
-    
     def evaluation_scenario(self, arena_size, evaluation_flag, num_envs, device):
         '''
         return drone, target and cylinders pos
@@ -1039,7 +1038,6 @@ class PredatorPrey_debug(IsaacEnv):
 
         # set force_z to 0
         return force.type(torch.float32)
-    
     
     def Janasov(self, C_inter=0.5, r_inter=0.5):
         force = torch.zeros(self.num_envs, self.num_agents, 3, device=self.device)

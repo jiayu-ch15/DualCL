@@ -1,12 +1,6 @@
-# model_dir: /home/chenjy/OmniDrones/scripts/outputs/random0to3_final/v2_0_catch0_2_height0_6_size0_9.pt
-# model_dir: /home/chenjy/OmniDrones/scripts/outputs/final_results/DR_wovalidation/seed0/v1_6_catch0_2_height1_2_size0_9.pt
-# model_dir: /home/chenjy/OmniDrones/scripts/outputs/cl_final2/v1_2_catch0_2.pt
 model_dir: null
-# 
-# hydra.job.chdir: false
 
 
-# headless: true
 headless: false
 
 sim: ${task.sim}
@@ -40,19 +34,7 @@ wandb:
   monitor_gym: True
   tags: 
 
-
-# wandb:
-#   group: ${oc.select:..task.name}
-#   run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
-#   job_type: train
-#   entity: marl-drones
-#   project: omnidrones200
-#   mode: disabled # set to 'disabled' when debugging locally
-#   run_id: 
-#   monitor_gym: True
-#   tags: 
-
 defaults:
-  - task: PredatorPrey_debug
+  - task: HideAndSeek_circle_eval
   - algo: mappo
   - _self_

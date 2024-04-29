@@ -95,7 +95,7 @@ def main(cfg):
 
     task_choice = 4
     
-    test_mode = 0
+    test_mode = 1
     
     cfg.task.v_prey = 2.4
     cfg.task.catch_radius = 0.12
@@ -104,10 +104,10 @@ def main(cfg):
     cfg.task.evaluation_flag = eval_flags[task_choice]
     cfg.task.cylinder.max_active = int(cfg.task.evaluation_flag[0])
 
-    # cfg.task.evaluation_flag = 'random'
-    cfg.task.evaluation_flag = 'sim2real'
-    cfg.task.cylinder.max_active = 0
-    cfg.task.cylinder.random_active = False
+    # # cfg.task.evaluation_flag = 'random'
+    # cfg.task.evaluation_flag = 'sim2real'
+    # cfg.task.cylinder.max_active = 0
+    # cfg.task.cylinder.random_active = False
 
 
     if test_mode==0:
