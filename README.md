@@ -6,7 +6,7 @@ Jiayu Chen, Guosheng Li, Chao Yu, Xinyi Yang, Botian Xu, Huazhong Yang, Yu Wang
 
 Website: https://sites.google.com/view/dualcl
 
-This repository implements a dual curriculum learning framwork (DualCL), for multi-UAV pursuit-evasion problems. The implementation in this repositorory is used in the paper "A Dual Curriculum Learning Framework for Multi-UAV Pursuit-Evasion in Diverse Environments " (xxxx). This repository is heavily based on https://github.com/btx0424/OmniDrones.git.
+This repository implements a dual curriculum learning framwork (DualCL), for multi-UAV pursuit-evasion problems. The implementation in this repositorory is used in the paper "A Dual Curriculum Learning Framework for Multi-UAV Pursuit-Evasion in Diverse Environments ". This repository is heavily based on https://github.com/btx0424/OmniDrones.git.
 
 
 ## Install
