@@ -859,13 +859,21 @@ class HideAndSeek_circle_cl(IsaacEnv):
         cylinders_pos, _ = self.get_env_poses(self.cylinders.get_world_poses())
         cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
                                                                           origin_cylinder_pos=cylinders_pos, device=self.device)
+        collision_cylinder = torch.zeros_like(collision_reward)
         for i in range(self.num_cylinders):
             relative_pos = drone_pos[..., :2] - cylinders_pos[:, i, :2].unsqueeze(-2)
             norm_r = torch.norm(relative_pos, dim=-1)
             if_coll = ((drone_pos[..., 2] - cylinders_height[:, i].unsqueeze(-1) - self.collision_radius) < 0) \
                             * (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
             tmp_cylinder_mask = self.cylinders_mask[:, i].unsqueeze(-1).expand(-1, self.num_agents)
+            collision_cylinder += if_coll * tmp_cylinder_mask
             collision_reward += - self.collision_coef * if_coll * tmp_cylinder_mask
+        
+        collision_flag = torch.any(collision_reward < 0, dim=1)
+        self.stats["collision"].add_(collision_flag.unsqueeze(1))
+        self.stats['collision_cylinder'].add_(collision_cylinder.mean(-1).unsqueeze(-1))
+        self.stats['collision_wall'].add_(collision_wall.mean(-1).unsqueeze(-1))
+        self.stats['collision_reward'].add_(collision_reward.mean(-1).unsqueeze(-1))
 
         # distance reward
         # min_dist = target_dist
