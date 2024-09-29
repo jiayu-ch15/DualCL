@@ -322,14 +322,6 @@ def main(cfg):
             return_contiguous=False
         )
 
-        # manual cl evaluation
-        eval_num_cylinders = np.arange(cfg.task.cylinder.min_active, cfg.task.cylinder.max_active + 1)
-        capture_dict = dict()
-        for idx in range(len(eval_num_cylinders)):
-            num_cylinder = eval_num_cylinders[idx]
-            capture_dict.update({'capture_{}'.format(num_cylinder): trajs['info']['capture_{}'.format(num_cylinder)][:, -1].mean().cpu().numpy()})
-        # base_env.update_base_cl(capture_dict=capture_dict)
-
         # after rollout, set rendering mode to not headless and reset env
         base_env.enable_render(not cfg.headless)
         env.train() # set env back to training mode after evaluation
@@ -353,8 +345,6 @@ def main(cfg):
             "eval/stats." + k: torch.nanmean(v.float()).item() 
             for k, v in traj_stats.items()
         }
-        
-        info.update(capture_dict)
                         
         return info
 
@@ -400,12 +390,9 @@ def main(cfg):
         
         if i % 100 == 0 and i > 0:
             base_env.outer_curriculum_module.save_task(cl_model_dir, i)
-        
-        # info.update(render())
 
         # save policy model every certain step
         if save_interval > 0 and i % save_interval == 0:
-            
             if hasattr(policy, "state_dict"):
                 ckpt_path = os.path.join(run.dir, f"checkpoint_{collector._frames}.pt")
                 logging.info(f"Save checkpoint to {str(ckpt_path)}")

@@ -330,6 +330,12 @@ class HideAndSeek(IsaacEnv):
         }).expand(self.num_envs).to(self.device)
         info_spec = CompositeSpec({
             "drone_state": UnboundedContinuousTensorSpec((self.drone.n, 13)),
+            'capture_0': UnboundedContinuousTensorSpec(1),
+            'capture_1': UnboundedContinuousTensorSpec(1),
+            'capture_2': UnboundedContinuousTensorSpec(1),
+            'capture_3': UnboundedContinuousTensorSpec(1),
+            'capture_4': UnboundedContinuousTensorSpec(1),
+            'capture_5': UnboundedContinuousTensorSpec(1),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.observation_spec["info"] = info_spec
