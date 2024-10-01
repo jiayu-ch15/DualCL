@@ -195,28 +195,6 @@ def main(cfg):
         print("Successfully load model!")
 
     frames_per_batch = env.num_envs * int(cfg.algo.train_every)
-    total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
-    max_iters = cfg.get("max_iters", -1)
-    eval_interval = cfg.get("eval_interval", -1)
-    save_interval = cfg.get("save_interval", -1)
-
-    # prepare the container to store statistics of each episode
-    stats_keys = [
-        k for k in base_env.observation_spec.keys(True, True) 
-        if isinstance(k, tuple) and k[0]=="stats"
-    ]
-    episode_stats = EpisodeStats(stats_keys)
-
-    # wrapper for env and policy
-    # used to automatically perform policy in the env 
-    collector = SyncDataCollector(
-        env,
-        policy=policy,
-        frames_per_batch=frames_per_batch,
-        total_frames=total_frames,
-        device=cfg.sim.device,
-        return_same_td=True,
-    )
 
     @torch.no_grad()
     def evaluate(
@@ -294,67 +272,11 @@ def main(cfg):
         
         return info
 
-    pbar = tqdm(collector)
-    env.train() # set env into training mode
     base_env.set_train = True
-    fps = []
-    
-    # # eval for 1 times
-    # info = {}
-    # info.update(evaluate())
-    # run.log(info)
-    # breakpoint()
-    
-    # for each iteration, the collector perform one step in the env
-    # and get the result rollout as data
-    for i, data in enumerate(pbar):
-        # fps.append(collector._fps)
-        info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
 
-        # store rollout data into the container
-        episode_stats(data.to_tensordict())
-
-        # if episode_stats is full (as long as the number of envs)
-        # transfer all the statistics into info and clear the container
-        if len(episode_stats) >= base_env.num_envs:
-            stats = {
-                "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v).item() 
-                for k, v in episode_stats.pop().items(True, True)
-            }
-            info.update(stats)
-        
-        # update the policy using rollout data and store the training statistics
-        # info.update(policy.train_op(data.to_tensordict()))
-
-        # evaluate every certain step
-        logging.info(f"Eval at {collector._frames} steps.")
-        info.update(evaluate())
-
-        # log infos into wandb run
-        run.log(info)
-        print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
-
-        pbar.set_postfix({
-            "rollout_fps": collector._fps,
-            "frames": collector._frames,
-        })
-
-        if max_iters > 0 and i >= max_iters - 1:
-            break 
-    
-    # final evaluation after training
-    logging.info(f"Final Eval at {collector._frames} steps.")
-    info = {"env_frames": collector._frames}
+    info = {}
     info.update(evaluate())
     run.log(info)
-
-    # final save
-    if hasattr(policy, "state_dict"):
-        ckpt_path = os.path.join(run.dir, "checkpoint_final.pt")
-        logging.info(f"Save checkpoint to {str(ckpt_path)}")
-        torch.save(policy.state_dict(), ckpt_path)
-
-    wandb.save(os.path.join(run.dir, "checkpoint*"))
     wandb.finish()
     
     simulation_app.close()

@@ -127,6 +127,9 @@ class HideAndSeek_circle_eval(IsaacEnv):
         self.collision_radius = self.cfg.task.collision_radius
         self.init_poses = self.drone.get_world_poses(clone=True)
         self.v_prey = self.cfg.task.v_drone * self.cfg.task.v_prey
+        self.catch_reward_coef = self.cfg.task.catch_reward_coef
+        self.collision_coef = self.cfg.task.collision_coef
+        self.speed_coef = self.cfg.task.speed_coef
         
         self.central_env_pos = Float3(
             *self.envs_positions[self.central_env_idx].tolist()
@@ -182,11 +185,15 @@ class HideAndSeek_circle_eval(IsaacEnv):
 
         # stats and infos
         stats_spec = CompositeSpec({
-            "capture": UnboundedContinuousTensorSpec(1),
+            "success": UnboundedContinuousTensorSpec(1),
             "collision": UnboundedContinuousTensorSpec(1),
-            "capture_episode": UnboundedContinuousTensorSpec(1),
-            "collision_episode": UnboundedContinuousTensorSpec(1),
-            "capture_per_step": UnboundedContinuousTensorSpec(1),
+            "speed_reward": UnboundedContinuousTensorSpec(1),
+            "collision_reward": UnboundedContinuousTensorSpec(1),
+            "collision_wall": UnboundedContinuousTensorSpec(1),
+            "collision_cylinder": UnboundedContinuousTensorSpec(1),
+            "collision_drone": UnboundedContinuousTensorSpec(1),
+            "catch_reward": UnboundedContinuousTensorSpec(1),
+            "out_of_arena": UnboundedContinuousTensorSpec(1),
             "first_capture_step": UnboundedContinuousTensorSpec(1),
             # "cover_rate": UnboundedContinuousTensorSpec(1),
             "catch_radius": UnboundedContinuousTensorSpec(1),
@@ -803,84 +810,90 @@ class HideAndSeek_circle_eval(IsaacEnv):
         )
 
     def _compute_reward_and_done(self):
-        drone_pos, _ = self.drone.get_world_poses()
-        target_pos, _ = self.target.get_world_poses()
+        drone_pos, _ = self.get_env_poses(self.drone.get_world_poses())
+        target_pos, _ = self.get_env_poses(self.target.get_world_poses())
+        
         target_pos = target_pos.unsqueeze(1)
 
         target_dist = torch.norm(target_pos - drone_pos, dim=-1)
 
-        capture_flag = (target_dist < self.catch_radius)
-        self.stats['capture_episode'].add_(torch.sum(capture_flag, dim=1).unsqueeze(-1))
-        self.stats['capture'].set_(torch.from_numpy(self.stats['capture_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
-        
-        self.stats['capture_0'].set_(torch.ones_like(self.stats['capture'], device=self.device) * self.stats['capture'][(self.cylinders_mask.sum(-1) == 0)].mean())
-        for idx in range(self.max_active_cylinders):
-            self.stats['capture_{}'.format(idx + 1)].set_(torch.ones_like(self.stats['capture'], device=self.device) * self.stats['capture'][(self.cylinders_mask.sum(-1) == idx + 1)].mean())
-        if not self.set_train:
-            self.info['capture_0'].set_(torch.ones_like(self.stats['capture'], device=self.device) * self.stats['capture'][(self.cylinders_mask.sum(-1) == 0)].mean())
-            for idx in range(self.max_active_cylinders):
-                self.info['capture_{}'.format(idx + 1)].set_(torch.ones_like(self.stats['capture'], device=self.device) * self.stats['capture'][(self.cylinders_mask.sum(-1) == idx + 1)].mean())
-        
-        self.stats['capture_per_step'].set_(self.stats['capture_episode'] / self.step_spec)
-        # catch_reward = 10 * capture_flag.type(torch.float32) # selfish
-        catch_reward = 10 * torch.any(capture_flag, dim=-1).unsqueeze(-1).expand_as(capture_flag) # cooperative
-        catch_flag = torch.any(catch_reward, dim=1).unsqueeze(-1)
-        self.stats['first_capture_step'][catch_flag * (self.stats['first_capture_step'] >= self.step_spec)] = self.step_spec
+        self.capture = (target_dist < self.catch_radius)
+        broadcast_capture = torch.any(self.capture, dim=-1).unsqueeze(-1).expand_as(self.capture) # cooperative reward
+        catch_reward = self.catch_reward_coef * broadcast_capture
+        capture_flag = torch.any(catch_reward, dim=1)
+        self.stats["success"] = torch.logical_or(capture_flag.unsqueeze(1), self.stats["success"]).float()
 
+        current_capture_step = capture_flag.float() * self.progress_buf + (~capture_flag).float() * self.max_episode_length
+        self.stats['first_capture_step'] = torch.min(self.stats['first_capture_step'], current_capture_step.unsqueeze(1))
+        self.stats['catch_reward'].add_(catch_reward.mean(-1).unsqueeze(-1))
+        
         # speed penalty
-        if self.cfg.task.use_speed_penalty:
-            drone_vel = self.drone.get_velocities()
-            drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
-            speed_reward = - 100 * (drone_speed_norm > self.cfg.task.v_drone)
-        else:
-            speed_reward = 0.0
+        drone_vel = self.drone.get_velocities()
+        drone_speed_norm = torch.norm(drone_vel[..., :3], dim=-1)
+        speed_reward = - self.speed_coef * (drone_speed_norm > self.cfg.task.v_drone)
+        self.stats['speed_reward'].add_(speed_reward.mean(-1).unsqueeze(-1))
 
-        # collison with cylinders
-        coll_reward = torch.zeros(self.num_envs, self.num_agents, device=self.device)
-        
-        cylinders_pos, _ = self.cylinders.get_world_poses()
-        
+        # collision
+        # for drones
+        drone_pos_dist = torch.norm(self.drone_rpos, dim=-1)
+        collision_drone = (drone_pos_dist < 2.0 * self.collision_radius).float().sum(-1)
+        collision_reward = - self.collision_coef * collision_drone
+        self.stats['collision_drone'].add_(collision_drone.mean(-1).unsqueeze(-1))
+        # for wall
+        collision_wall = ((drone_pos[..., -1] > self.max_height).type(torch.float32) + ((drone_pos[..., 0]**2 + drone_pos[..., 1]**2) > self.arena_size**2).type(torch.float32))
+        collision_reward += - self.collision_coef * collision_wall
+        # for cylinders
+        cylinders_pos, _ = self.get_env_poses(self.cylinders.get_world_poses())
         cylinders_pos, cylinders_height = refresh_cylinder_pos_height(max_cylinder_height=self.cylinder_height,
-                                                                          origin_cylinder_pos=cylinders_pos,                                                               device=self.device)
+                                                                          origin_cylinder_pos=cylinders_pos, device=self.device)
+        collision_cylinder = torch.zeros_like(collision_reward)
         for i in range(self.num_cylinders):
             relative_pos = drone_pos[..., :2] - cylinders_pos[:, i, :2].unsqueeze(-2)
             norm_r = torch.norm(relative_pos, dim=-1)
-            # if_coll = (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
             if_coll = ((drone_pos[..., 2] - cylinders_height[:, i].unsqueeze(-1) - self.collision_radius) < 0) \
                             * (norm_r < (self.collision_radius + self.cylinders_size[i])).type(torch.float32)
             tmp_cylinder_mask = self.cylinders_mask[:, i].unsqueeze(-1).expand(-1, self.num_agents)
-            coll_reward -= if_coll * tmp_cylinder_mask # sparse
-
-        self.stats['collision_episode'].add_((torch.sum(coll_reward, dim=1) < 0.0).unsqueeze(-1))
-        self.stats['collision'].set_(torch.from_numpy(self.stats['collision_episode'].to('cpu').numpy() > 0.0).type(torch.float32).to(self.device))
-
-        # distance reward
-        # min_dist = target_dist
-        min_dist = (torch.min(target_dist, dim=-1)[0].unsqueeze(-1).expand_as(target_dist))
-        current_min_dist = torch.min(target_dist, dim=-1).values.unsqueeze(-1)
-
-        self.stats['min_distance'].set_(torch.min(current_min_dist, self.stats['min_distance']))
+            collision_cylinder += if_coll * tmp_cylinder_mask
+            collision_reward += - self.collision_coef * if_coll * tmp_cylinder_mask
         
-        dist_reward_mask = (min_dist > self.catch_radius)
-        distance_reward = - 1.0 * min_dist * dist_reward_mask
-        
-        reward = speed_reward + 1.0 * catch_reward + 1.0 * distance_reward + self.cfg.task.collision_coef * coll_reward
-        
-        self._tensordict["return"] += reward.unsqueeze(-1)
-        self.returns = self._tensordict["return"].sum(1)
-        self.stats["return"].set_(self.returns)
+        collision_flag = torch.any(collision_reward < 0, dim=1)
+        self.stats["collision"].add_(collision_flag.unsqueeze(1))
+        self.stats['collision_cylinder'].add_(collision_cylinder.mean(-1).unsqueeze(-1))
+        self.stats['collision_wall'].add_(collision_wall.mean(-1).unsqueeze(-1))
+        self.stats['collision_reward'].add_(collision_reward.mean(-1).unsqueeze(-1))
 
-        # other reward
-        self.stats['collision_return'].add_(5 * coll_reward.sum(1).unsqueeze(-1))
-        self.stats['speed_return'].add_(speed_reward.sum(1).unsqueeze(-1))
-        self.stats['distance_return'].add_(distance_reward.sum(1).unsqueeze(-1))
-        self.stats['capture_return'].add_(catch_reward.sum(1).unsqueeze(-1))
+        reward = speed_reward + catch_reward + collision_reward
+        
+        self.stats["return"] += reward.mean(-1).unsqueeze(-1)
 
         done  = (
             (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
         )
-            
+                    
         self.progress_std = torch.std(self.progress_buf)
+
+        ep_len = self.progress_buf.unsqueeze(-1)
+        self.stats["collision"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["catch_reward"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["collision_reward"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["collision_wall"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["collision_drone"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["collision_cylinder"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
+        self.stats["speed_reward"].div_(
+            torch.where(done, ep_len, torch.ones_like(ep_len))
+        )
 
         return TensorDict({
             "agents": {
@@ -1009,7 +1022,7 @@ class HideAndSeek_circle_eval(IsaacEnv):
             xaxis=drone_xaxis[self.central_env_idx, 0, :],
             yaxis=drone_yaxis[self.central_env_idx, 0, :],
             zaxis=drone_zaxis[self.central_env_idx, 0, :],
-            drange=0.05,
+            drange=self.catch_radius,
         )
         point_list = [
             _carb_float3_add(p, self.central_env_pos) for p in point_list
